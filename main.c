@@ -3,7 +3,7 @@
 /*scan words from stdin, print total amount for each word by DESC order*/
 int main(void) {
     PyDictObject *mp = dict_new_custom(10000, 0, 0, 0, 0, 0, 0, 0);
-    //PyDictObject *mp = dict_new();
+//    PyDictObject *mp = dict_new();
     char keybuf[100];
     size_t valuebuf[] = { 1 };
     size_t *vp;
@@ -19,6 +19,8 @@ int main(void) {
 //        vp = dict_force_search(mp, keybuf);
 //        *vp += 1;
 //    }
+
+//    other test functions 
 //    dict_del(mp, "the");
 //    *valuebuf=123456789;
 //    dict_add(mp,"the",valuebuf);
@@ -28,7 +30,7 @@ int main(void) {
 //    dict_del(mp, "of");
     dict_print_by_value_desc(mp);
     dict_clear(mp);
-    dict_clear(mp); //just for test
+    dict_clear(mp); //duplicate clear just for test
     free(mp);
     return 0;
 }
