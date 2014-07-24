@@ -5,5 +5,6 @@
 #include <assert.h>
 typedef void PyObject;
 #include "dict.h"
+#include "rbtree.h"
 #include "list.h"
 #include "set.h"
