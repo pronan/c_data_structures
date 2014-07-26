@@ -3,10 +3,6 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <assert.h>
-#include "dict.h"
-#include "rbtree.h"
-#include "list.h"
-#include "set.h"
 
 #ifndef X_DEBUG
     #define X_DEBUG
@@ -32,3 +28,8 @@
     } while(0)
 
 typedef struct {} DummyStruct;
+
+#include "dict.h"
+#include "rbtree.h"
+#include "list.h"
+#include "set.h"
