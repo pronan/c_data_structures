@@ -1,31 +1,31 @@
 #include "xlib.h"
 
 static int
-default_keycmp(PyObject *key1, PyObject *key2) {
+default_keycmp(void *key1, void *key2) {
     return strcmp((char *)key1, (char *)key2);
 }
 
-static PyObject *
-default_keydup(PyObject *key) {
-    return (PyObject *)strdup((char *)key);
+static void *
+default_keydup(void *key) {
+    return (void *)strdup((char *)key);
 }
 
-static PyObject *
-default_valuedup(PyObject *_value) {
+static void *
+default_valuedup(void *_value) {
     size_t *value = (size_t*)malloc(sizeof(size_t));
     *value = *(size_t *)_value;
-    return (PyObject *)value;
+    return (void *)value;
 }
 
-static PyObject *
+static void *
 default_valuedefault(void) {
     size_t *value = (size_t*)malloc(sizeof(size_t));
     *value = 0;
-    return (PyObject *)value;
+    return (void *)value;
 }
 
 static rbnode *
-rbnode_new(rbtree *tr, PyObject *key, PyObject *value) {
+rbnode_new(rbtree *tr, void *key, void *value) {
     rbnode *nd = (rbnode *) malloc(sizeof(rbnode));
     if (nd == NULL)
         return NULL;
@@ -47,7 +47,7 @@ rbnode_new(rbtree *tr, PyObject *key, PyObject *value) {
 }
 
 static rbnode *
-rbnode_fnew(rbtree *tr, PyObject *key) {
+rbnode_fnew(rbtree *tr, void *key) {
     assert(key);
     rbnode *nd = (rbnode *) malloc(sizeof(rbnode));
     if (nd == NULL)
@@ -116,7 +116,7 @@ right_rotate(rbtree *tr, rbnode *x) {
 }
 
 static rbnode *
-rbnode_get(rbtree *tr, PyObject *key) {
+rbnode_get(rbtree *tr, void *key) {
     rbnode *x = tr->root;
     int r;
     while (x != tr->nil) {
@@ -250,12 +250,12 @@ print_by_key_asce(rbtree *tr, rbnode *nd) {
 }
 
 rbtree *
-rb_cnew(int (*keycmp)(PyObject *key1, PyObject *key2),
-        PyObject * (*keydup)(PyObject *key),
-        PyObject * (*valuedup)(PyObject *value),
-        PyObject * (*valuedefault)(void),
-        void (*keyfree)(PyObject *key),
-        void (*valuefree)(PyObject *value)) {
+rb_cnew(int (*keycmp)(void *key1, void *key2),
+        void * (*keydup)(void *key),
+        void * (*valuedup)(void *value),
+        void * (*valuedefault)(void),
+        void (*keyfree)(void *key),
+        void (*valuefree)(void *value)) {
     rbtree *tr = (rbtree *) malloc(sizeof(rbtree));
     if (tr == NULL)
         return NULL;
@@ -312,14 +312,14 @@ rb_free(rbtree *tr) {
     free(tr);
 }
 
-PyObject *
-rb_get(rbtree *tr, PyObject *key) {
+void *
+rb_get(rbtree *tr, void *key) {
     rbnode *nd = rbnode_get(tr, key);
     return nd ? nd->value : NULL;
 }
 
-PyObject *
-rb_fget(rbtree *tr, PyObject *key) {
+void *
+rb_fget(rbtree *tr, void *key) {
     rbnode *y = tr->nil;
     rbnode *x = tr->root;
     int r;
@@ -353,10 +353,10 @@ rb_fget(rbtree *tr, PyObject *key) {
 }
 
 int
-rb_set(rbtree *tr, PyObject *key, PyObject *value) {
+rb_set(rbtree *tr, void *key, void *value) {
     assert(key);
     assert(value);
-    PyObject *oldvalue;
+    void *oldvalue;
     rbnode *y = tr->nil;
     rbnode *x = tr->root;
     int r;
@@ -365,9 +365,9 @@ rb_set(rbtree *tr, PyObject *key, PyObject *value) {
         if (r == 0) {
             oldvalue = x->value;
             if ((x->value = tr->valuedup(value)) == NULL)
-                return EXIT_FAILURE;
+                return -1;
             tr->valuefree(oldvalue);
-            return EXIT_SUCCESS;
+            return 0;
         }
         y = x;
         if (r < 0)
@@ -377,7 +377,7 @@ rb_set(rbtree *tr, PyObject *key, PyObject *value) {
     }
     rbnode *z = rbnode_new(tr, key, value);
     if (z == NULL)
-        return EXIT_FAILURE;
+        return -1;
     z->p = y;
     if (y == tr->nil)
         tr->root = z;
@@ -390,16 +390,147 @@ rb_set(rbtree *tr, PyObject *key, PyObject *value) {
     z->color = RED;
     rb_add_fixup(tr, z);
     tr->size++;
-    return EXIT_SUCCESS;
+    return 0;
+}
+
+int
+rb_rset(rbtree *tr, void *key, void *value) {
+    assert(key);
+    assert(value);
+    void *oldvalue;
+    rbnode *y = tr->nil;
+    rbnode *x = tr->root;
+    int r;
+    while (x != tr->nil) {
+        r = tr->keycmp(key, x->key);
+        if (r == 0) {
+            if (value == x->value)
+                return 0;
+            oldvalue = x->value;
+            x->value = value;
+            tr->valuefree(oldvalue);
+            return 0;
+        }
+        y = x;
+        if (r < 0)
+            x = x->left;
+        else
+            x = x->right;
+    }
+    rbnode *z = rbnode_new(tr, 0, 0);
+    if (z == NULL)
+        return -1;
+    z->key = key;
+    z->value = value;
+    z->p = y;
+    if (y == tr->nil)
+        tr->root = z;
+    else if (tr->keycmp(key, y->key) < 0)
+        y->left = z;
+    else
+        y->right = z;
+    z->left = tr->nil;
+    z->right = tr->nil;
+    z->color = RED;
+    rb_add_fixup(tr, z);
+    tr->size++;
+    return 0;
+}
+
+int
+rb_add(rbtree *tr, void *key, void *value) {
+    assert(key);
+    assert(value);
+    rbnode *z = rbnode_new(tr, key, value);
+    if (z == NULL)
+        return -1;
+    rbnode *y = tr->nil;
+    rbnode *x = tr->root;
+    while (x != tr->nil) {
+        y = x;
+        if (tr->keycmp(key, x->key) < 0)
+            x = x->left;
+        else
+            x = x->right;
+    }
+    z->p = y;
+    if (y == tr->nil)
+        tr->root = z;
+    else if (tr->keycmp(z->key, y->key) < 0)
+        y->left = z;
+    else
+        y->right = z;
+    z->left = tr->nil;
+    z->right = tr->nil;
+    z->color = RED;
+    rb_add_fixup(tr, z);
+    tr->size++;
+    return 0;
+}
+
+int
+rb_radd(rbtree *tr, void *key, void *value) {
+    assert(key);
+    assert(value);
+    rbnode *z = rbnode_new(tr, 0, 0);
+    if (z == NULL)
+        return -1;
+    rbnode *y = tr->nil;
+    rbnode *x = tr->root;
+    while (x != tr->nil) {
+        y = x;
+        if (tr->keycmp(key, x->key) < 0)
+            x = x->left;
+        else
+            x = x->right;
+    }
+    z->key = key;
+    z->value = value;
+    z->p = y;
+    if (y == tr->nil)
+        tr->root = z;
+    else if (tr->keycmp(z->key, y->key) < 0)
+        y->left = z;
+    else
+        y->right = z;
+    z->left = tr->nil;
+    z->right = tr->nil;
+    z->color = RED;
+    rb_add_fixup(tr, z);
+    tr->size++;
+    return 0;
+}
+
+int
+rb_update(rbtree *tr, void *key, void *value) {
+    rbnode *nd = rbnode_get(tr, key);
+    assert(nd);
+    void *oldvalue = nd->value;
+    if ((nd->value = tr->valuedup(value)) == NULL)
+        return -1;
+    tr->valuefree(oldvalue);
+    return 0;
+}
+
+int
+rb_rupdate(rbtree *tr, void *key, void *value) {
+    rbnode *nd = rbnode_get(tr, key);
+    assert(nd);
+    if (value == nd->value)
+        return 0;
+    void *oldvalue = nd->value;
+    nd->value = value;
+    tr->valuefree(oldvalue);
+    return 0;
 }
 
 void
-rb_del(rbtree *tr, PyObject *key) {
+rb_del(rbtree *tr, void *key) {
     assert(key);
     rbnode *z = rbnode_get(tr, key);
     assert(z);
     rbnode *y = z;
-    rb_color y_original_color = y->color;
+    rbcolor y_original_color = y->color;
     rbnode *x;
     if (z->left == tr->nil) {
         x = z->right;
@@ -429,51 +560,8 @@ rb_del(rbtree *tr, PyObject *key) {
     tr->size--;
 }
 
-int
-rb_add(rbtree *tr, PyObject *key, PyObject *value) {
-    assert(key);
-    assert(value);
-    rbnode *z = rbnode_new(tr, key, value);
-    if (z == NULL)
-        return EXIT_FAILURE;
-    rbnode *y = tr->nil;
-    rbnode *x = tr->root;
-    while (x != tr->nil) {
-        y = x;
-        if (tr->keycmp(z->key, x->key) < 0)
-            x = x->left;
-        else
-            x = x->right;
-    }
-    z->p = y;
-    if (y == tr->nil)
-        tr->root = z;
-    else if (tr->keycmp(z->key, y->key) < 0)
-        y->left = z;
-    else
-        y->right = z;
-    z->left = tr->nil;
-    z->right = tr->nil;
-    z->color = RED;
-    rb_add_fixup(tr, z);
-    tr->size++;
-    return EXIT_SUCCESS;
-}
-
-int
-rb_update(rbtree *tr, PyObject *key, PyObject *value) {
-    rbnode *nd = rbnode_get(tr, key);
-    if (nd == NULL)
-        return EXIT_FAILURE;
-    PyObject *oldvalue = nd->value;
-    if ((nd->value = tr->valuedup(value)) == NULL)
-        return EXIT_FAILURE;
-    tr->valuefree(oldvalue);
-    return EXIT_SUCCESS;
-}
-
 rbnode *
-rb_min(rbtree *tr, rbnode* x) {
+rb_min(rbtree *tr, rbnode *x) {
     if (x == NULL)
         x = tr->root;
     while (x->left != tr->nil)
@@ -482,7 +570,7 @@ rb_min(rbtree *tr, rbnode* x) {
 }
 
 rbnode *
-rb_max(rbtree *tr, rbnode* x) {
+rb_max(rbtree *tr, rbnode *x) {
     if (x == NULL)
         x = tr->root;
     while (x->right != tr->nil)
