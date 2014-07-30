@@ -1,10 +1,10 @@
 
-#define SET_COPY_INIT(mp) (set_cnew(\
-    (mp)->used,\
-    (mp)->keyhash,\
-    (mp)->keycmp,\
-    (mp)->keydup,\
-    (mp)->keyfree));
+#define SET_COPY_INIT(sp) (set_cnew(\
+    (sp)->used,\
+    (sp)->keyhash,\
+    (sp)->keycmp,\
+    (sp)->keydup,\
+    (sp)->keyfree));
 
 #define BIGGER(a,b) ((a)->used>=(b)->used?(a):(b))
 #define SMALLER(a,b) ((a)->used<(b)->used?(a):(b))
@@ -16,6 +16,7 @@ typedef struct {
 
 typedef struct _setobject SetObject;
 struct _setobject {
+    ObjectType type;
     size_t fill;  /* # Active + # Dummy */
     size_t used;  /* # Active */
     size_t mask;
@@ -27,6 +28,13 @@ struct _setobject {
     void (*keyfree)(void *key);
 };
 
+typedef struct {
+    ObjectType type;
+    SetEntry *inipos;
+    size_t rest;
+}SetIterObject;
+
+/* set level functions */
 SetObject *
 set_cnew(size_t size,
          size_t (*keyhash)(void *key),
@@ -34,23 +42,46 @@ set_cnew(size_t size,
          void * (*keydup)(void *key),
          void (*keyfree)(void *key));
 SetObject *set_new(void);
-void set_clear(SetObject *so);
-void set_free(SetObject *so);
-SetObject *set_copy(SetObject *so);
-SetObject *set_or(SetObject *so, SetObject *other);
-SetObject *set_and(SetObject *so, SetObject *other);
-SetObject *set_sub(SetObject *so, SetObject *other);
-SetObject *set_xor(SetObject *so, SetObject *other);
-int set_ior(SetObject *so, SetObject *other);
-int set_iand(SetObject *so, SetObject *other);
-int set_isub(SetObject *so, SetObject *other);
-int set_ixor(SetObject *so, SetObject *other);
-size_t set_issuperset(SetObject *so, SetObject *other);
-size_t set_subset(SetObject *so, SetObject *other);
-int set_add(SetObject *so, void *key);
-void set_del(SetObject *so, void *key);
-int set_radd(SetObject *so, void *key);
-size_t set_len(SetObject *so);
-size_t set_has(SetObject *mp, void *key);
-void set_print(SetObject *so);
-int set_addfrom(SetObject *so, void **keylist, size_t size);
+void set_clear(SetObject *sp);
+void set_free(SetObject *sp);
+SetObject *set_copy(SetObject *sp);
+size_t set_len(SetObject *sp);
+
+/* set level functions, basic operations between two sets */
+SetObject *set_or(SetObject *sp, SetObject *other);
+SetObject *set_and(SetObject *sp, SetObject *other);
+SetObject *set_sub(SetObject *sp, SetObject *other);
+SetObject *set_xor(SetObject *sp, SetObject *other);
+int set_ior(SetObject *sp, SetObject *other);
+int set_iand(SetObject *sp, SetObject *other);
+int set_isub(SetObject *sp, SetObject *other);
+int set_ixor(SetObject *sp, SetObject *other);
+size_t set_issuperset(SetObject *sp, SetObject *other);
+size_t set_subset(SetObject *sp, SetObject *other);
+
+/*key level functions*/
+int set_add(SetObject *sp, void *key);
+size_t set_has(SetObject *sp, void *key);
+void set_del(SetObject *sp, void *key);
+void set_discard(SetObject *sp, void *key);
+
+/*key level functions, passing references instead of a copy.
+'r' prefix is short for 'reference'*/
+int set_radd(SetObject *sp, void *key);
+
+/*traversal interfaces of SetObject*/
+IterObject *set_iter_new(SetObject *sp);
+size_t set_iter_walk(IterObject *sio, void **key_addr);
+void set_iter_flush(IterObject *sio);
+
+/*other functions for printing or testing*/
+void set_print(SetObject *sp);
+void set_addfrom(SetObject *sp, void **keylist, size_t size);
+
+/*communicate between other data structures*/
+SetObject *
+set_fromlist(ListObject *lp,
+             size_t (*keyhash)(void *key),
+             int (*keycmp)(void *key1, void *key2),
+             void * (*keydup)(void *key),
+             void (*keyfree)(void *key));
