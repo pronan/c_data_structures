@@ -23,7 +23,7 @@ list_resize(ListObject *lp, int newsize) {
     */
     if (allocated >= newsize && newsize >= (allocated >> 1)) {
         assert(lp->table != NULL || newsize == 0);
-        Py_SIZE(lp) = newsize;
+        lp->used = newsize;
         return 0;
     }
     /* This over-allocates proportional to the list size, making room
@@ -35,7 +35,7 @@ list_resize(ListObject *lp, int newsize) {
      */
     new_allocated = (newsize >> 3) + (newsize < 9 ? 3 : 6);
     /* check for integer overflow */
-    if (new_allocated > PY_SIZE_MAX - newsize) {
+    if (new_allocated > SIZE_MAX - newsize) {
         return -1;
     } else {
         new_allocated += newsize;
@@ -43,15 +43,15 @@ list_resize(ListObject *lp, int newsize) {
     if (newsize == 0)
         new_allocated = 0;
     items = lp->table;
-    if (new_allocated <= (PY_SIZE_MAX / sizeof(void *)))
-        PyMem_RESIZE(items, void *, new_allocated);
+    if (new_allocated <= (SIZE_MAX / sizeof(void *)))
+        Mem_RESIZE(items, void *, new_allocated);
     else
         items = NULL;
     if (items == NULL) {
         return -1;
     }
     lp->table = items;
-    Py_SIZE(lp) = newsize;
+    lp->used = newsize;
     lp->allocated = new_allocated;
     return 0;
 }
@@ -68,7 +68,7 @@ list_cnew(size_t size,
     }
     /* Check for overflow without an actual overflow,
      *  which can cause compiler to optimise out */
-    if ((size_t)size > PY_SIZE_MAX / sizeof(void *))
+    if ((size_t)size > SIZE_MAX / sizeof(void *))
         return NULL;
     nbytes = size * sizeof(void *);
     lp = (ListObject *)malloc(sizeof(ListObject));
@@ -77,15 +77,15 @@ list_cnew(size_t size,
     if (size == 0)
         lp->table = NULL;
     else {
-        lp->table = (void **) PyMem_MALLOC(nbytes);
+        lp->table = (void **) Mem_MALLOC(nbytes);
         if (lp->table == NULL) {
-            list_free(lp);
+            free(lp);
             return NULL;
         }
         memset(lp->table, 0, nbytes);
     }
     lp->type = LIST;
-    Py_SIZE(lp) = size;
+    lp->used = size;
     lp->allocated = size;
     lp->keycmp = keycmp ? keycmp : default_keycmp;
     lp->keydup = keydup ? keydup : default_keydup;
@@ -95,7 +95,7 @@ list_cnew(size_t size,
 
 ListObject *
 list_new(void) {
-    ListObject *lp = PyMem_NEW(ListObject, 1);
+    ListObject *lp = Mem_NEW(ListObject, 1);
     if (lp == NULL)
         return NULL;
     lp->table = NULL;
@@ -108,22 +108,20 @@ list_new(void) {
     return lp;
 }
 
-int
+void
 list_clear(ListObject *lp) {
-    size_t i, n = lp->used;
-    for(i = 0; i < n; i++) {
-        lp->keyfree(lp->table[i]);
-    }
-    if (list_resize(lp, 0) == -1) {
-        return -1;
-    }
-    return 0;
+    int n = lp->used;
+    while (--n >= 0)
+        lp->keyfree(lp->table[n]);
+    free(lp->table);
+    lp->used = 0;
+    lp->allocated = 0;
+    lp->table = NULL;
 }
 
 int
 list_free(ListObject *lp) {
-    if (list_clear(lp) == -1)
-        return -1;
+    list_clear(lp);
     free(lp);
     return 0;
 }
@@ -148,12 +146,17 @@ list_copy(ListObject *lp) {
 
 size_t
 list_len(ListObject *lp) {
-    return Py_SIZE(lp);
+    return lp->used;
+}
+
+size_t
+list_is_empty(ListObject *lp) {
+    return lp->used == 0;
 }
 
 void *
 list_get(ListObject *lp, int index) {
-    int n = Py_SIZE(lp);
+    int n = lp->used;
     if (index < 0)
         index += n;
     if (index < 0 || index >= n) {
@@ -162,15 +165,15 @@ list_get(ListObject *lp, int index) {
     return lp->table[index];
 }
 
-/* insert nv's reference before where */
+/* insert v's reference before where */
 int
 list_rinsert(ListObject *lp, int where, void *v) {
-    int i, n = Py_SIZE(lp);
+    int i, n = lp->used;
     void **items;
     if (v == NULL) {
         return -1;
     }
-    if (n == PY_SSIZE_T_MAX) {
+    if (n == SSIZE_T_MAX) {
         return -1;
     }
     if (list_resize(lp, n + 1) == -1)
@@ -189,22 +192,22 @@ list_rinsert(ListObject *lp, int where, void *v) {
     return 0;
 }
 
-/* insert nv's copy before where */
+/* insert v's copy before where */
 int
 list_insert(ListObject *lp, int where, void *v) {
-    int n = Py_SIZE(lp);
+    int n = lp->used;
     void *new_v;
     if (v == NULL) {
         return -1;
     }
-    if (n == PY_SSIZE_T_MAX) {
+    if (n == SSIZE_T_MAX) {
         return -1;
     }
     new_v = (void*)lp->keydup(v);
     if (new_v == NULL) {
         return -1;
     }
-    if (list_rinsert(lp,where,new_v)==-1){
+    if (list_rinsert(lp, where, new_v) == -1) {
         lp->keyfree(new_v);
         return -1;
     }
@@ -213,43 +216,43 @@ list_insert(ListObject *lp, int where, void *v) {
 
 /* add nv's copy to the end of lp */
 int
-list_add(ListObject *lp, void *nv) {
-    int n = Py_SIZE(lp);
-    if (n == PY_SSIZE_T_MAX) {
+list_add(ListObject *lp, void *v) {
+    int n = lp->used;
+    if (n == SSIZE_T_MAX) {
         return -1;
     }
-    assert (nv != NULL);
-    void *v = (void*)lp->keydup(nv);
-    if (v == NULL) {
+    assert (v != NULL);
+    void *new_v = (void*)lp->keydup(v);
+    if (new_v == NULL) {
         return -1;
     }
     if (list_resize(lp, n + 1) == -1) {
-        lp->keyfree(v);
+        lp->keyfree(new_v);
+        return -1;
+    }
+    lp->table[n] = new_v;
+    return 0;
+}
+
+/* add nv's reference to the end of lp */
+int
+list_radd(ListObject *lp, void *v) {
+    int n = lp->used;
+    if (n == SSIZE_T_MAX) {
+        return -1;
+    }
+    assert (v != NULL);
+    if (list_resize(lp, n + 1) == -1) {
         return -1;
     }
     lp->table[n] = v;
     return 0;
 }
 
-/* add nv's reference to the end of lp */
-int
-list_radd(ListObject *lp, void *nv) {
-    int n = Py_SIZE(lp);
-    if (n == PY_SSIZE_T_MAX) {
-        return -1;
-    }
-    assert (nv != NULL);
-    if (list_resize(lp, n + 1) == -1) {
-        return -1;
-    }
-    lp->table[n] = nv;
-    return 0;
-}
-
 /* pop the last key out of lp */
 void *
 list_pop(ListObject *lp) {
-    size_t n = Py_SIZE(lp);
+    size_t n = lp->used;
     if (n == 0)
         return NULL;
     void *v = lp->table[n - 1];
@@ -262,7 +265,7 @@ list_pop(ListObject *lp) {
 /* pop index th key out of lp */
 void *
 list_popi(ListObject *lp, int index) {
-    int i, n = Py_SIZE(lp);
+    int i, n = lp->used;
     void *v;
     if (index < 0)
         index += n;
@@ -281,10 +284,10 @@ list_popi(ListObject *lp, int index) {
 
 int
 list_del(ListObject *lp, int index) {
-    void *k = list_popi(lp, index);
-    if (k == NULL)
+    void *v = list_popi(lp, index);
+    if (v == NULL)
         return -1;
-    lp->keyfree(k);
+    lp->keyfree(v);
     return 0;
 }
 
@@ -313,8 +316,8 @@ list_count(ListObject *lp, void *key) {
 }
 
 static int
-slice_interpret(int n, int *start, int *stop, int *step) {
-    if (*step > 0) {
+slice_interpret(int n, int *start, int *stop, int step) {
+    if (step > 0) {
         if (*start >= n) /*the result must be empty list, return directly */
             return -1;
         if (*start < 0)
@@ -347,11 +350,11 @@ slice_interpret(int n, int *start, int *stop, int *step) {
 ListObject *
 list_rsslice(ListObject *lp, int start, int stop, int step) {
     assert(step != 0);
-    int n = Py_SIZE(lp);
     ListObject *nlp = list_cnew(0, lp->keycmp, lp->keydup, lp->keyfree);
     if (nlp == NULL)
         return NULL;
-    if (slice_interpret(n, &start, &stop, &step) == -1)
+    size_t n = lp->used;
+    if (slice_interpret(n, &start, &stop, step) == -1)
         return nlp;
     void *k;
     int factor = step > 0 ? 1 : -1;
@@ -368,11 +371,11 @@ list_rsslice(ListObject *lp, int start, int stop, int step) {
 ListObject *
 list_sslice(ListObject *lp, int start, int stop, int step) {
     assert(step != 0);
-    int n = Py_SIZE(lp);
     ListObject *nlp = list_cnew(0, lp->keycmp, lp->keydup, lp->keyfree);
     if (nlp == NULL)
         return NULL;
-    if (slice_interpret(n, &start, &stop, &step) == -1)
+    size_t n = lp->used;
+    if (slice_interpret(n, &start, &stop, step) == -1)
         return nlp;
     void *k;
     int factor = step > 0 ? 1 : -1;
@@ -388,12 +391,12 @@ list_sslice(ListObject *lp, int start, int stop, int step) {
 
 ListObject *
 list_rslice(ListObject *lp, int start, int stop) {
-    return list_rsslice(lp,start,stop,1);
+    return list_rsslice(lp, start, stop, 1);
 }
 
 ListObject *
 list_slice(ListObject *lp, int start, int stop) {
-    return list_sslice(lp,start,stop,1);
+    return list_sslice(lp, start, stop, 1);
 }
 
 IterObject *
@@ -408,6 +411,7 @@ list_iter_new(ListObject * lp) {
     lio->type = LIST;
     return lio;
 }
+
 size_t
 list_iter_walk(IterObject * lio, void **key_addr) {
     if (lio->rest == 0)
@@ -418,6 +422,7 @@ list_iter_walk(IterObject * lio, void **key_addr) {
     lio->inipos = lp->table[lp->used - lio->rest];
     return 1;
 }
+
 void
 list_iter_flush(IterObject * lio) {
     ListObject *lp = (ListObject *)lio->object;
@@ -425,6 +430,7 @@ list_iter_flush(IterObject * lio) {
     lio->rest = lp->used;
     lio->type = LIST;
 }
+
 void
 list_print2(ListObject * lp) {
     size_t i, n = lp->used;
@@ -434,11 +440,12 @@ list_print2(ListObject * lp) {
         printf("index %u, value is %d\n", i, *(int*)k);
     }
 }
+
 void
 list_print(ListObject *lp) {
     assert(lp);
-    if (lp->used==0){
-        printf("[]\n");
+    if (lp->used == 0) {
+        printf("[]\n\n");
         return;
     }
     void *key;
