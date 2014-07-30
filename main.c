@@ -168,12 +168,54 @@ void test_list(void) {
     printf("new copy's size is %u, allocated is %u\n", nlp->used, nlp->allocated);
     list_print(nlp);
     printf("count %d: %d\n", *valuebuf, list_count(lp, valuebuf));
-    list_clear(lp);
+    //list_clear(lp);
+    //assert(list_is_empty(lp));
+    //assert(lp->table==NULL);
     list_free(nlp);
+    printf("MAX size is : %u, MAX int is :%d, MIN int is: %d\n", SIZE_MAX,
+           SSIZE_T_MAX, SSIZE_T_MIN);
+}
+
+size_t
+int_hash(void *key) {
+    int n = *(int*)key;
+    return (size_t)n;
+}
+
+void
+test_communicate() {
+    int valuebuf[] = { 1 };
+    size_t i;
+    ListObject *lp = list_new();
+    for(i = 0; i < 10; i++) {
+        *valuebuf = i;
+        list_add(lp, valuebuf);
+    }
+    ListObject *lp2 = list_new();
+    for(i = 5; i < 15; i++) {
+        *valuebuf = i;
+        list_add(lp2, valuebuf);
+    }
+    printf("list1 is:\n");
+    list_print(lp);
+    printf("list2 is:\n");
+    list_print(lp2);
+    SetObject *sp = set_fromlist(lp, int_hash, lp->keycmp, lp->keydup, 0);
+    printf("set from  list1 is:\n");
+    set_print_int(sp);
+    SetObject *sp2 = set_fromlist(lp2, int_hash, lp2->keycmp, lp2->keydup, 0);
+    printf("set from  list2 is:\n");
+    set_print_int(sp2);
+    printf("so, intersection of the two list is\n");
+    set_print_int(set_and(sp, sp2));
+    list_free(lp);
+    list_free(lp2);
+    set_free(sp);
+    set_free(sp2);
 }
 
 /*scan words from stdin, print total amount for each word by DESC order*/
 int main(void) {
-    test_list();
+    test_communicate();
     return 0;
 }
