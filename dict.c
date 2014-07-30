@@ -39,12 +39,12 @@ default_valuedefault(void) {
 
 /*intern basic search method, used by other fucntions*/
 static DictEntry *
-dict_search(DictObject *mp, void *key, size_t hash) {
+dict_search(DictObject *dp, void *key, size_t hash) {
     size_t i;
     size_t perturb;
     DictEntry *freeslot;
-    size_t mask = mp->mask;
-    DictEntry *ep0 = mp->table;
+    size_t mask = dp->mask;
+    DictEntry *ep0 = dp->table;
     DictEntry *ep;
     i = (size_t)hash & mask;
     ep = &ep0[i];
@@ -53,7 +53,7 @@ dict_search(DictObject *mp, void *key, size_t hash) {
     if (ep->key == dummy)
         freeslot = ep;
     else if (ep->hash == hash
-             && mp->keycmp(ep->key, key) == 0)
+             && dp->keycmp(ep->key, key) == 0)
         return ep;
     else
         freeslot = NULL;
@@ -64,7 +64,7 @@ dict_search(DictObject *mp, void *key, size_t hash) {
             return freeslot == NULL ? ep : freeslot;
         if (ep->key == key || (ep->hash == hash
                                && ep->key != dummy
-                               && mp->keycmp(ep->key, key) == 0))
+                               && dp->keycmp(ep->key, key) == 0))
             return ep;
         if (ep->key == dummy && freeslot == NULL)
             freeslot = ep;
@@ -75,62 +75,63 @@ dict_search(DictObject *mp, void *key, size_t hash) {
 
 /*faster method used when no dummy key exists in table*/
 static DictEntry *
-dict_search_nodummy(DictObject *mp, void *key, size_t hash) {
+dict_search_nodummy(DictObject *dp, void *key, size_t hash) {
     size_t i;
     size_t perturb;
-    size_t mask = mp->mask;
-    DictEntry *ep0 = mp->table;
+    size_t mask = dp->mask;
+    DictEntry *ep0 = dp->table;
     DictEntry *ep;
     i = (size_t)hash & mask;
     ep = &ep0[i];
     if (ep->key == NULL
-        || ep->key == key
-        || (ep->hash == hash && mp->keycmp(ep->key, key) == 0))
+            || ep->key == key
+            || (ep->hash == hash && dp->keycmp(ep->key, key) == 0))
         return ep;
     for (perturb = hash;; perturb >>= PERTURB_SHIFT) {
         i = (i << 2) + i + perturb + 1;
         ep = &ep0[i & mask];
         if (ep->key == NULL
-            || ep->key == key
-            || (ep->hash == hash && mp->keycmp(ep->key, key) == 0))
+                || ep->key == key
+                || (ep->hash == hash && dp->keycmp(ep->key, key) == 0))
             return ep;
     }
     assert(0);          /* NOT REACHED */
-    return EXIT_SUCCESS;
+    return 0;
 }
 
 /*
-intern routine used by dict_update and dict_set, allocate
-new data copy if necessary.
+intern routine used by dict_add, dict_replace and dict_set,
+always makes a copy of key and value and free old ones as
+possible.
 */
 static int
-dict_insert_by_entry(DictObject *mp, void *key, size_t hash, DictEntry *ep,
-                    void *value) {
+dict_insert_by_entry(DictObject *dp, void *key, size_t hash, DictEntry *ep,
+                     void *value) {
     if (ep->value) {
         void *old_value = ep->value;
-        if ((ep->value = mp->valuedup(value)) == NULL)
-            return EXIT_FAILURE;
-        mp->valuefree(old_value);
+        if ((ep->value = dp->valuedup(value)) == NULL)
+            return -1;
+        dp->valuefree(old_value);
     } else {
         void *old_key = ep->key;
-        if ((ep->key = mp->keydup(key)) == NULL)
-            return EXIT_FAILURE;
-        if ((ep->value = mp->valuedup(value)) == NULL) {
-            mp->keyfree(ep->key);
-            return EXIT_FAILURE;
+        if ((ep->key = dp->keydup(key)) == NULL)
+            return -1;
+        if ((ep->value = dp->valuedup(value)) == NULL) {
+            dp->keyfree(ep->key);
+            return -1;
         }
         if (old_key == NULL)
-            mp->fill++;
-        mp->used++;
+            dp->fill++;
+        dp->used++;
         ep->hash = hash;
     }
-    return EXIT_SUCCESS;
+    return 0;
 }
 
 static int
-dict_insert(DictObject *mp, void *key, size_t hash, void *value) {
-    DictEntry *ep = dict_search(mp, key, hash);
-    return dict_insert_by_entry(mp, key, hash, ep, value);
+dict_insert(DictObject *dp, void *key, size_t hash, void *value) {
+    DictEntry *ep = dict_search(dp, key, hash);
+    return dict_insert_by_entry(dp, key, hash, ep, value);
 }
 
 /*
@@ -139,12 +140,12 @@ equal key exists in table, and insert references, not
 a new data copy.
 */
 static void
-dict_insert_clean(DictObject *mp, void *key, size_t hash,
-                 void *value) {
+dict_insert_clean(DictObject *dp, void *key, size_t hash,
+                  void *value) {
     size_t i;
     size_t perturb;
-    size_t mask = mp->mask;
-    DictEntry *ep0 = mp->table;
+    size_t mask = dp->mask;
+    DictEntry *ep0 = dp->table;
     DictEntry *ep;
     i = (size_t)hash & mask;
     ep = &ep0[i];
@@ -152,8 +153,8 @@ dict_insert_clean(DictObject *mp, void *key, size_t hash,
         i = (i << 2) + i + perturb + 1;
         ep = &ep0[i & mask];
     }
-    mp->fill++;
-    mp->used++;
+    dp->fill++;
+    dp->used++;
     ep->key = key;
     ep->hash = hash;
     ep->value = value;
@@ -165,7 +166,7 @@ items again.  When entries have been deleted, the new table may
 actually be smaller than the old one.
 */
 static int
-dict_resize(DictObject *mp, size_t minused) {
+dict_resize(DictObject *dp, size_t minused) {
     size_t newsize;
     DictEntry *oldtable, *newtable, *ep;
     DictEntry small_copy[HASH_MINSIZE];
@@ -175,52 +176,42 @@ dict_resize(DictObject *mp, size_t minused) {
             newsize <<= 1)
         ;
     /* Get space for a new table. */
-    oldtable = mp->table;
-    size_t is_oldtable_malloced = (oldtable != mp->smalltable);
+    oldtable = dp->table;
+    size_t is_oldtable_malloced = (oldtable != dp->smalltable);
     if (newsize == HASH_MINSIZE) {
         /* A large table is shrinking, or we can't get any smaller. */
-        newtable = mp->smalltable;
+        newtable = dp->smalltable;
         if (newtable == oldtable) {
-            if (mp->fill == mp->used) {
+            if (dp->fill == dp->used) {
                 /* No dummies, so no point doing anything. */
-                return EXIT_SUCCESS;
+                return 0;
             }
-            assert(mp->fill > mp->used);
+            assert(dp->fill > dp->used);
             memcpy(small_copy, oldtable, sizeof(small_copy));
             oldtable = small_copy;
         }
     } else {
         newtable = (DictEntry*)malloc(sizeof(DictEntry) * newsize);
         if (newtable == NULL)
-            return EXIT_FAILURE;
+            return -1;
     }
     /* Make the dict empty, using the new table. */
     assert(newtable != oldtable);
     memset(newtable, 0, sizeof(DictEntry)* newsize);
-    mp->table = newtable;
-    mp->mask = newsize - 1;
-    size_t used = mp->used;
-    mp->used = 0;
-    mp->fill = 0;
+    dp->table = newtable;
+    dp->mask = newsize - 1;
+    size_t used = dp->used;
+    dp->used = 0;
+    dp->fill = 0;
     for (ep = oldtable; used > 0; ep++) {
         if (ep->value) {             /* active entry */
             used--;
-#ifdef X_DEBUG
-            assert(ep->key != dummy);
-#endif
-            dict_insert_clean(mp, ep->key, ep->hash, ep->value);
+            dict_insert_clean(dp, ep->key, ep->hash, ep->value);
         }
-#ifdef X_DEBUG
-        else if (ep->key) {    /* dummy entry */
-            assert(ep->key == dummy);
-            fprintf(stderr, "dict_resize -> found a dummy key, its hash is %u.\n",
-                    ep->hash);
-        }
-#endif
     }
     if (is_oldtable_malloced)
         free(oldtable);
-    return EXIT_SUCCESS;
+    return 0;
 }
 
 /*helper function for sorting a DictEntry by its value*/
@@ -239,8 +230,8 @@ dict_cnew(size_t size,
           void * (*valuedefault)(void),
           void (*keyfree)(void *key),
           void (*valuefree)(void *value)) {
-    DictObject *mp = (DictObject *)malloc(sizeof(DictObject));
-    if (mp == NULL)
+    DictObject *dp = (DictObject *)malloc(sizeof(DictObject));
+    if (dp == NULL)
         return NULL;
     size_t newsize;
     for (newsize = HASH_MINSIZE;
@@ -252,277 +243,281 @@ dict_cnew(size_t size,
         if (newtable == NULL)
             return NULL;
         memset(newtable, 0, sizeof(DictEntry)* newsize);
-        mp->table = newtable;
-        mp->mask = newsize - 1;
-        mp->fill = mp->used = 0;
+        dp->table = newtable;
+        dp->mask = newsize - 1;
+        dp->fill = dp->used = 0;
     } else {
-        EMPTY_TO_MINSIZE(mp);
+        EMPTY_TO_MINSIZE(dp);
     }
-    mp->keyhash = keyhash ? keyhash : default_keyhash;
-    mp->keycmp = keycmp ? keycmp : default_keycmp;
-    mp->keydup = keydup ? keydup : default_keydup;
-    mp->valuedup = valuedup ? valuedup : default_valuedup;
-    mp->valuedefault = valuedefault ? valuedefault : default_valuedefault;
-    mp->keyfree = keyfree ? keyfree : free;
-    mp->valuefree = valuefree ? valuefree : free;
-    return mp;
+    dp->type = DICT;
+    dp->keyhash = keyhash ? keyhash : default_keyhash;
+    dp->keycmp = keycmp ? keycmp : default_keycmp;
+    dp->keydup = keydup ? keydup : default_keydup;
+    dp->valuedup = valuedup ? valuedup : default_valuedup;
+    dp->valuedefault = valuedefault ? valuedefault : default_valuedefault;
+    dp->keyfree = keyfree ? keyfree : free;
+    dp->valuefree = valuefree ? valuefree : free;
+    return dp;
 }
 
 DictObject *
 dict_new(void) {
-    DictObject *mp = (DictObject *)malloc(sizeof(DictObject));
-    if (mp == NULL)
+    DictObject *dp = (DictObject *)malloc(sizeof(DictObject));
+    if (dp == NULL)
         return NULL;
-    EMPTY_TO_MINSIZE(mp);
-    mp->keyhash = default_keyhash;
-    mp->keycmp = default_keycmp;
-    mp->keydup = default_keydup;
-    mp->valuedup = default_valuedup;
-    mp->valuedefault = default_valuedefault;
-    mp->keyfree = free;
-    mp->valuefree = free;
-    return mp;
+    EMPTY_TO_MINSIZE(dp);
+    dp->type = DICT;
+    dp->keyhash = default_keyhash;
+    dp->keycmp = default_keycmp;
+    dp->keydup = default_keydup;
+    dp->valuedup = default_valuedup;
+    dp->valuedefault = default_valuedefault;
+    dp->keyfree = free;
+    dp->valuefree = free;
+    return dp;
 }
 
 void
-dict_clear(DictObject *mp) {
-    DictEntry *ep, *table = mp->table;
+dict_clear(DictObject *dp) {
+    DictEntry *ep, *table = dp->table;
     assert(table != NULL);
     DictEntry small_copy[HASH_MINSIZE];
-    size_t table_is_malloced = (table != mp->smalltable);
-    size_t fill = mp->fill;
-    size_t used = mp->used;
+    size_t table_is_malloced = (table != dp->smalltable);
+    size_t fill = dp->fill;
+    size_t used = dp->used;
     if (table_is_malloced)
-        EMPTY_TO_MINSIZE(mp);
+        EMPTY_TO_MINSIZE(dp);
     else if (fill > 0) {
         /* It's a small table with something that needs to be cleared. */
         memcpy(small_copy, table, sizeof(small_copy));
         table = small_copy;
-        EMPTY_TO_MINSIZE(mp);
+        EMPTY_TO_MINSIZE(dp);
     } else /* else it's a small table that's already empty */
         return;
     for (ep = table; used > 0; ep++) {
         /*only free active entry, this is different from thon 2.7*/
         if (ep->value) {
             used--;
-#ifdef X_DEBUG
-            assert(ep->key != dummy);
-#endif
-            mp->keyfree(ep->key);
-            mp->valuefree(ep->value);
+            dp->keyfree(ep->key);
+            dp->valuefree(ep->value);
         }
-#ifdef X_DEBUG
-        else if (ep->key) {    /* dummy entry */
-            assert(ep->key == dummy);
-            fprintf(stderr, "dict_clear -> found a dummy key, its hash is %u.\n", ep->hash);
-        }
-#endif
     }
     if (table_is_malloced)
         free(table);
 }
 
 void
-dict_free(DictObject *mp) {
-    dict_clear(mp);
-    free(mp);
+dict_free(DictObject *dp) {
+    dict_clear(dp);
+    free(dp);
 }
 
+/*return key's correspondent value. if key does not
+exist, return NULL.*/
 void *
-dict_get(DictObject *mp, void *key) {
+dict_get(DictObject *dp, void *key) {
     assert(key);
-    size_t hash = mp->keyhash(key);
-    DictEntry *ep = dict_search(mp, key, hash);
+    size_t hash = dp->keyhash(key);
+    DictEntry *ep = dict_search(dp, key, hash);
     return ep->value;
 }
 
+/*if the @key exists, replacing its correspondent value A with @value's
+copy, then free A. if not, add @key and @value's copy to the dict*/
 int
-dict_set(DictObject *mp, void *key, void *value) {
+dict_set(DictObject *dp, void *key, void *value) {
     assert(key);
     assert(value);
-    size_t hash = mp->keyhash(key);
-    if (dict_insert(mp, key, hash, value) == EXIT_FAILURE)
-        return EXIT_FAILURE;
-    if (NEED_RESIZE(mp))
-        return dict_resize(mp, RESIZE_NUM(mp));
-    return EXIT_SUCCESS;
+    size_t hash = dp->keyhash(key);
+    if (dict_insert(dp, key, hash, value) == -1)
+        return -1;
+    if (NEED_RESIZE(dp))
+        return dict_resize(dp, RESIZE_NUM(dp));
+    return 0;
 }
 
+/*almost the same as dict_set, except only passing @key or @value's
+address, not a copy*/
 int
-dict_rset(DictObject *mp, void *key, void *value) {
+dict_rset(DictObject *dp, void *key, void *value) {
     assert(key);
     assert(value);
-    size_t hash = mp->keyhash(key);
-    DictEntry *ep = dict_search(mp, key, hash);
-    /*if key exists, same as dict_rupdate_value*/
+    size_t hash = dp->keyhash(key);
+    DictEntry *ep = dict_search(dp, key, hash);
+    /*if key exists, same as dict_rreplace*/
     if (ep->value) {
+        /* free the key if necessary*/
+        if (ep->key != key)
+            dp->keyfree(key);
         if (ep->value == value)
-            return EXIT_SUCCESS;
+            return 0;
         void *old_value = ep->value;
         ep->value = value;
-        mp->valuefree(old_value);
+        dp->valuefree(old_value);
     } else {
         /*if key doesn't exist, same as dict_radd*/
         if (ep->key == NULL)
-            mp->fill++;
-        mp->used++;
+            dp->fill++;
+        dp->used++;
         ep->key = key;
         ep->value = value;
         ep->hash = hash;
-        if (NEED_RESIZE(mp))
-            return dict_resize(mp, RESIZE_NUM(mp));
+        if (NEED_RESIZE(dp))
+            return dict_resize(dp, RESIZE_NUM(dp));
     }
-    return EXIT_SUCCESS;
+    return 0;
 }
 
+/*add @key and @value's copy to the dict. if @key already exists,
+the program will exit.*/
 int
-dict_add(DictObject *mp, void *key, void *value) {
+dict_add(DictObject *dp, void *key, void *value) {
     assert(key);
     assert(value);
-    size_t hash = mp->keyhash(key);
-    DictEntry *ep = dict_search(mp, key, hash);
+    size_t hash = dp->keyhash(key);
+    DictEntry *ep = dict_search(dp, key, hash);
     /*only for non-existing keys*/
     assert(ep->value == NULL);
-    if (dict_insert_by_entry(mp, key, hash, ep, value) == EXIT_FAILURE)
-        return EXIT_FAILURE;
-    if (NEED_RESIZE(mp))
-        return dict_resize(mp, RESIZE_NUM(mp));
-    return EXIT_SUCCESS;
+    if (dict_insert_by_entry(dp, key, hash, ep, value) == -1)
+        return -1;
+    if (NEED_RESIZE(dp))
+        return dict_resize(dp, RESIZE_NUM(dp));
+    return 0;
 }
 
+/*almost the same as dict_add, except only passing @key
+or @value's address, not its memory copy*/
 int
-dict_radd(DictObject *mp, void *key, void *value) {
+dict_radd(DictObject *dp, void *key, void *value) {
     assert(key);
     assert(value);
-    size_t hash = mp->keyhash(key);
-    DictEntry *ep = dict_search(mp, key, hash);
+    size_t hash = dp->keyhash(key);
+    DictEntry *ep = dict_search(dp, key, hash);
     /*only for non-existing keys*/
     assert(ep->value == NULL);
     if (ep->key == NULL)
-        mp->fill++;
-    mp->used++;
+        dp->fill++;
+    dp->used++;
     ep->key = key;
     ep->value = value;
     ep->hash = hash;
-    if (NEED_RESIZE(mp))
-        return dict_resize(mp, RESIZE_NUM(mp));
-    return EXIT_SUCCESS;
+    if (NEED_RESIZE(dp))
+        return dict_resize(dp, RESIZE_NUM(dp));
+    return 0;
 }
 
+/*replacing an existing key's correspondent value with
+the value's copy and free old value. But if the two
+values' addresses are the same, do nothing. */
 int
-dict_update_value(DictObject *mp, void *key, void *value) {
+dict_replace(DictObject *dp, void *key, void *value) {
     assert(key);
     assert(value);
-    size_t hash = mp->keyhash(key);
-    DictEntry *ep = dict_search(mp, key, hash);
+    size_t hash = dp->keyhash(key);
+    DictEntry *ep = dict_search(dp, key, hash);
     /*only for existing keys*/
     assert(ep->value);
-    return dict_insert_by_entry(mp, key, hash, ep, value);
+    return dict_insert_by_entry(dp, key, hash, ep, value);
 }
 
+/*almost the same as dict_replace, except only passing
+@value's address, not its memory copy*/
 int
-dict_rupdate_value(DictObject *mp, void *key, void *value) {
+dict_rreplace(DictObject *dp, void *key, void *value) {
     assert(key);
     assert(value);
-    size_t hash = mp->keyhash(key);
-    DictEntry *ep = dict_search(mp, key, hash);
+    size_t hash = dp->keyhash(key);
+    DictEntry *ep = dict_search(dp, key, hash);
     /*only for existing keys*/
     assert(ep->value);
-    /*duplicate update, no need to go further*/
+    /*duplicate call, no need to go further*/
     if (ep->value == value)
-        return EXIT_SUCCESS;
+        return 0;
     void *old_value = ep->value;
-    ep->value = value;
-    mp->valuefree(old_value);
-    return EXIT_SUCCESS;
+    ep->value = value; /*passing address*/
+    dp->valuefree(old_value);
+    return 0;
 }
 
 void
-dict_del(DictObject *mp, void *key) {
+dict_del(DictObject *dp, void *key) {
     assert(key);
-    size_t hash = mp->keyhash(key);
-    DictEntry *ep = dict_search(mp, key, hash);
+    size_t hash = dp->keyhash(key);
+    DictEntry *ep = dict_search(dp, key, hash);
     /*only for existing keys*/
     assert(ep->value);
-    mp->keyfree(ep->key);
-    mp->valuefree(ep->value);
+    dp->keyfree(ep->key);
+    dp->valuefree(ep->value);
     ep->key = dummy;
     ep->value = NULL;
-    mp->used--;
+    dp->used--;
 }
 
+/*if @key exists, same as dict_get. if not, add @key and the
+dict's default value's copies to dict first, then return this
+entry's value.*/
 void *
-dict_fget(DictObject *mp, void *key) {
+dict_fget(DictObject *dp, void *key) {
     assert(key);
-    size_t hash = mp->keyhash(key);
-    DictEntry *ep = dict_search(mp, key, hash);
+    size_t hash = dp->keyhash(key);
+    DictEntry *ep = dict_search(dp, key, hash);
     if (ep->value == NULL) { /* dummy or unused */
         void *old_key = ep->key;
-        if ((ep->key = mp->keydup(key)) == NULL)
+        if ((ep->key = dp->keydup(key)) == NULL)
             return NULL;
-        if ((ep->value = mp->valuedefault()) == NULL) {
-            mp->keyfree(ep->key);
+        if ((ep->value = dp->valuedefault()) == NULL) {
+            dp->keyfree(ep->key);
             return NULL;
         }
         if (old_key == NULL)
-            mp->fill++;
-        mp->used++;
+            dp->fill++;
+        dp->used++;
         ep->hash = hash;
-        if (NEED_RESIZE(mp)) {
-            dict_resize(mp, RESIZE_NUM(mp));
-            ep = dict_search_nodummy(mp, key, hash);
+        if (NEED_RESIZE(dp)) {
+            dict_resize(dp, RESIZE_NUM(dp));
+            ep = dict_search_nodummy(dp, key, hash);
         }
     }
     return ep->value;
 }
 
+/*same as bulk call dict_set to dp with keys and values from other*/
 int
-dict_update(DictObject *mp, DictObject *other) {
-    if (mp == other || other->used == 0)
-        return EXIT_SUCCESS;
+dict_update(DictObject *dp, DictObject *other) {
+    if (dp == other || other->used == 0)
+        return 0;
     /* Do one big resize at the start, rather than
      * incrementally resizing as we insert new items.  Expect
      * that there will be no (or few) overlapping keys.
      */
-    if ((mp->fill + other->used) * 3 >= (mp->mask + 1) * 2) {
-        if (dict_resize(mp, (mp->used + other->used) * 2) != EXIT_SUCCESS)
-            return EXIT_FAILURE;
+    if ((dp->fill + other->used) * 3 >= (dp->mask + 1) * 2) {
+        if (dict_resize(dp, (dp->used + other->used) * 2) != 0)
+            return -1;
     }
     DictEntry *ep;
     size_t used = other->used;
     for (ep = other->table; used > 0; ep++) {
         if (ep->value) {             /* active entry */
             used--;
-#ifdef X_DEBUG
-            assert(ep->key != dummy);
-#endif
-            if (dict_insert(mp, ep->key, ep->hash, ep->value) == EXIT_FAILURE)
-                return EXIT_FAILURE;
+            if (dict_insert_by_entry(dp, ep->key, ep->hash, ep, ep->value) == -1)
+                return -1;
         }
-#ifdef X_DEBUG
-        else if (ep->key) {    /* dummy entry */
-            assert(ep->key == dummy);
-            fprintf(stderr, "dict_copy -> found a dummy key, its hash is %u.\n",
-                    ep->hash);
-        }
-#endif
     }
-    return EXIT_SUCCESS;
+    return 0;
 }
 
-DictObject *dict_copy(DictObject *mp) {
-    DictObject *copy = DICT_COPY_INIT(mp);
+/*make a copy of dp, deleting dummy entries by the way*/
+DictObject *
+dict_copy(DictObject *dp) {
+    DictObject *copy = DICT_COPY_INIT(dp);
     if (copy == NULL)
         return NULL;
     DictEntry *ep;
     void *key, *value;
-    size_t used = mp->used;
-    for (ep = mp->table; used > 0; ep++) {
+    size_t used = dp->used;
+    for (ep = dp->table; used > 0; ep++) {
         if (ep->value) {             /* active entry */
             used--;
-#ifdef X_DEBUG
-            assert(ep->key != dummy);
-#endif
             if ((key = copy->keydup(ep->key)) == NULL) {
                 dict_free(copy);
                 return NULL;
@@ -534,53 +529,111 @@ DictObject *dict_copy(DictObject *mp) {
             }
             dict_insert_clean(copy, key, ep->hash, value);
         }
-#ifdef X_DEBUG
-        else if (ep->key) {    /* dummy entry */
-            assert(ep->key == dummy);
-            fprintf(stderr, "dict_copy -> found a dummy key, its hash is %u.\n",
-                    ep->hash);
-        }
-#endif
     }
     return copy;
 }
 
 size_t
-dict_len(DictObject *mp) {
-    return mp->used;
+dict_len(DictObject *dp) {
+    return dp->used;
 }
 
-size_t dict_has(DictObject *mp, void *key){
+size_t 
+dict_has(DictObject *dp, void *key) {
     assert(key);
-    return dict_get(mp,key)?1:0;
+    return dict_get(dp, key) ? 1 : 0;
+}
+
+IterObject *
+dict_iter_new(DictObject *dp) {
+    IterObject *dio;
+    dio = (IterObject*)malloc(sizeof(IterObject));
+    if (dio == NULL)
+        return NULL;
+    dio->object = (void*)dp;
+    dio->inipos = (void*)dp->table;
+    dio->rest = dp->used;
+    dio->type = DICT;
+    return dio;
+}
+
+size_t
+dict_iter_walk(IterObject *dio, void **key_addr) {
+    DictEntry *ep;
+    void *key;
+    size_t rest = dio->rest;
+    for(ep = (DictEntry *)dio->inipos; rest > 0; ep++) {
+        key = ep->key;
+        if ( key && key != dummy) {
+            dio->rest--;
+            dio->inipos = (void*)(ep + 1);
+            *key_addr = key;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void
+dict_iter_flush(IterObject *dio) {
+    DictObject *dp = (DictObject *)dio->object;
+    dio->inipos = (void*)dp->table;
+    dio->rest = dp->used;
+    dio->type = DICT;
+}
+
+size_t
+dict_iter_items(IterObject *dio, void **key_addr, void **value_addr) {
+    DictEntry *ep;
+    void *key;
+    size_t rest = dio->rest;
+    for(ep = (DictEntry *)dio->inipos; rest > 0; ep++) {
+        key = ep->key;
+        if ( key && key != dummy) {
+            dio->rest--;
+            dio->inipos = (void*)(ep + 1);
+            *key_addr = key;
+            *value_addr = ep->value;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void
+dict_print2(DictObject *dp) {
+    void *key, *value;
+    IterObject *dio = dict_iter_new(dp);
+    while (dict_iter_items(dio, &key, &value)) {
+        fprintf(stdout, "%s\t%u\n", (char*)key, *(size_t*)value);
+    }
+    free(dio);
+}
+
+void
+dict_print(DictObject *dp) {
+    void *key, *value;
+    IterObject *dio = iter(dp);
+    while (iterw(dio, &key)) {
+        value = dict_get(dp, key);
+        fprintf(stdout, "%s\t%u\n", (char*)key, *(size_t*)value);
+    }
+    free(dio);
 }
 
 /*print key value pair by value DESC order*/
 void
-dict_print_by_value_desc(DictObject *mp) {
+dict_print_by_value_desc(DictObject *dp) {
     DictEntry *ep;
-    DictEntry temp_table[mp->used];
-    size_t i = 0, used = mp->used;
-#ifdef X_DEBUG
-    fprintf(stderr, "hash table, size:%u, del:%u, used:%u\n", mp->mask + 1,
-            mp->fill - mp->used, mp->used);
-#endif
-    for (ep = mp->table; used > 0; ep++) {
+    DictEntry temp_table[dp->used];
+    size_t i = 0, used = dp->used;
+    for (ep = dp->table; used > 0; ep++) {
         if (ep->value) {
             used--;
-#ifdef X_DEBUG
-            assert(ep->key != dummy);
-#endif
             temp_table[i++] = *ep;
         }
-#ifdef X_DEBUG
-        else if (ep->key) {
-            assert(ep->key == dummy);
-            fprintf(stderr, "print -> found a dummy key, its hash is %u.\n", ep->hash);
-        }
-#endif
     }
-    used = mp->used;
+    used = dp->used;
     qsort(temp_table, used, sizeof(temp_table[0]), _valcmp);
     for (i = 0; i < used; i++)
         fprintf(stdout, "%s\t%u\n", (char *)temp_table[i].key,
