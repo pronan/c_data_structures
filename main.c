@@ -20,8 +20,8 @@ test_dict(void) {
     *valuebuf = 123456789;
     dict_set(mp, "test", valuebuf);
     DictObject *copy = dict_copy(mp);
-    dict_print_by_value_desc(copy);
-    fprintf(stdout, "===above is copy===\n");
+    //dict_print_by_value_desc(copy);
+    //fprintf(stdout, "===above is copy===\n");
     dict_free(copy);
     *valuebuf = 1;
     size_t *vp;
@@ -52,7 +52,24 @@ test_dict(void) {
     dict_add(mp2, "laoma", valuebuf);
     dict_update(mp, mp2);
     dict_free(mp2);
-    dict_print_by_value_desc(mp);
+    //dict_print_by_value_desc(mp);
+    dict_print(mp);
+    void *key, *value;
+    IterObject *dio = iter(mp);
+    printf("\nwalk again...\n");
+    while(iterw(dio, &key)) {
+        value = dict_get(mp, key);
+        fprintf(stdout, "%s\t%u\n", (char*)key, *(size_t*)value);
+    }
+    *valuebuf = 9888888;
+    dict_set(mp, "emacs", valuebuf);
+    iterf(dio);
+    printf("\nwalk again 2...\n");
+    while(iterw(dio, &key)) {
+        value = dict_get(mp, key);
+        fprintf(stdout, "%s\t%u\n", (char*)key, *(size_t*)value);
+    }
+    free(dio);
     dict_clear(mp);
     dict_clear(mp); //just for test
     dict_free(mp);
@@ -118,8 +135,45 @@ test_set(void) {
     set_free(b);
 }
 
+void test_list(void) {
+    int valuebuf[] = { 1 };
+    size_t i;
+    ListObject *lp = list_new();
+    assert(list_is_empty(lp));
+    for(i = 0; i < 10; i++) {
+        *valuebuf = i;
+        list_add(lp, valuebuf);
+    }
+    list_print(list_rsslice(lp, 0, 10, 1));
+    list_print(list_sslice(lp, 9, -11, -1));
+    list_print(list_rsslice(lp, -1, -1, -1));
+    list_print(list_rsslice(lp, -1, -110, -1));
+    list_print(list_rsslice(lp, -1, -11, -2));
+    list_print(list_sslice(lp, -1, -3, -1));
+    list_print(list_sslice(lp, -3, -1, 1));
+    list_print(list_sslice(lp, -1, 7, -1));
+    printf("get: %d\n", *(int*)list_get(lp, 2));
+    printf("pop: %d\n", *(int*)list_popi(lp, 0));
+    *valuebuf = -2;
+    list_insert(lp, 0, valuebuf);
+    *valuebuf = -200;
+    list_insert(lp, -1, valuebuf);
+    list_print(lp);
+    list_del(lp, 0);
+    list_rinsert(lp, -1, valuebuf);
+    list_rinsert(lp, -1, valuebuf);
+    printf("get: %d\n", *(int*)list_get(lp, 0));
+    list_print(lp);
+    ListObject *nlp = list_copy(lp);
+    printf("new copy's size is %u, allocated is %u\n", nlp->used, nlp->allocated);
+    list_print(nlp);
+    printf("count %d: %d\n", *valuebuf, list_count(lp, valuebuf));
+    list_clear(lp);
+    list_free(nlp);
+}
+
 /*scan words from stdin, print total amount for each word by DESC order*/
 int main(void) {
-    test_set();
+    test_list();
     return 0;
 }
