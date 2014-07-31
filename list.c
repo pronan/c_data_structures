@@ -156,7 +156,7 @@ list_is_empty(ListObject *lp) {
 
 void *
 list_get(ListObject *lp, int index) {
-    int n = lp->used;
+    size_t n = lp->used;
     if (index < 0)
         index += n;
     if (index < 0 || index >= n) {
@@ -165,14 +165,41 @@ list_get(ListObject *lp, int index) {
     return lp->table[index];
 }
 
+int
+list_set(ListObject *lp, int index, void *key) {
+    assert(key);
+    size_t n = lp->used;
+    if (index < 0)
+        index += n;
+    if (index < 0 || index >= n) {
+        return -1;
+    }
+    void* new_v = (void*)lp->keydup(key);
+    if (new_v == NULL) {
+        return -1;
+    }
+    lp->table[index] = new_v;
+    return 0;
+}
+
+int list_rset(ListObject *lp, int index, void *key) {
+    assert(key);
+    size_t n = lp->used;
+    if (index < 0)
+        index += n;
+    if (index < 0 || index >= n) {
+        return -1;
+    }
+    lp->table[index] = key;
+    return 0;
+}
+
 /* insert v's reference before where */
 int
 list_rinsert(ListObject *lp, int where, void *v) {
+    assert(v);
     int i, n = lp->used;
     void **items;
-    if (v == NULL) {
-        return -1;
-    }
     if (n == SSIZE_T_MAX) {
         return -1;
     }
@@ -195,11 +222,9 @@ list_rinsert(ListObject *lp, int where, void *v) {
 /* insert v's copy before where */
 int
 list_insert(ListObject *lp, int where, void *v) {
+    assert(v);
     int n = lp->used;
     void *new_v;
-    if (v == NULL) {
-        return -1;
-    }
     if (n == SSIZE_T_MAX) {
         return -1;
     }
@@ -214,14 +239,14 @@ list_insert(ListObject *lp, int where, void *v) {
     return 0;
 }
 
-/* add nv's copy to the end of lp */
+/* add v's copy to the end of lp */
 int
 list_add(ListObject *lp, void *v) {
+    assert(v);
     int n = lp->used;
     if (n == SSIZE_T_MAX) {
         return -1;
     }
-    assert (v != NULL);
     void *new_v = (void*)lp->keydup(v);
     if (new_v == NULL) {
         return -1;
@@ -234,14 +259,14 @@ list_add(ListObject *lp, void *v) {
     return 0;
 }
 
-/* add nv's reference to the end of lp */
+/* add v's reference to the end of lp */
 int
 list_radd(ListObject *lp, void *v) {
+    assert(v);
     int n = lp->used;
     if (n == SSIZE_T_MAX) {
         return -1;
     }
-    assert (v != NULL);
     if (list_resize(lp, n + 1) == -1) {
         return -1;
     }
@@ -300,6 +325,22 @@ list_index(ListObject *lp, void *key) {
         if(k == key || lp->keycmp(key, k) == 0)
             return i;
     }
+    return -1;
+}
+
+int
+list_remove(ListObject *lp, void *key) {
+    size_t i, n = lp->used;
+    void *k;
+    for(i = 0; i < n; i++) {
+        k = lp->table[i];
+        if(k == key || lp->keycmp(key, k) == 0)
+            if (list_del(lp,i)==-1)
+                return -1;
+            else
+                return 0;
+    }
+    assert(0);/* raise key not found error */
     return -1;
 }
 
@@ -449,11 +490,11 @@ list_print(ListObject *lp) {
         return;
     }
     void *key;
-    IterObject *sio = iter(lp);
+    IterObject *lio = iter(lp);
     printf("[");
-    while(iterw(sio, &key)) {
+    while(iterw(lio, &key)) {
         printf("%d, ", *(int*)key);
     }
-    free(sio);
+    free(lio);
     printf("]\n\n");
 }
