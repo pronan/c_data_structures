@@ -168,12 +168,14 @@ void test_list(void) {
     printf("new copy's size is %u, allocated is %u\n", nlp->used, nlp->allocated);
     list_print(nlp);
     printf("count %d: %d\n", *valuebuf, list_count(lp, valuebuf));
-    //list_clear(lp);
-    //assert(list_is_empty(lp));
-    //assert(lp->table==NULL);
+    *valuebuf=12333;
+    printf("change index 0's value to 12333\n");
+    list_set(nlp,0,valuebuf);
+    *valuebuf=2;
+    printf("remove first value equals 2\n");
+    list_remove(nlp,valuebuf);
+    list_print(nlp);
     list_free(nlp);
-    printf("MAX size is : %u, MAX int is :%d, MIN int is: %d\n", SIZE_MAX,
-           SSIZE_T_MAX, SSIZE_T_MIN);
 }
 
 size_t
@@ -216,6 +218,6 @@ test_communicate() {
 
 /*scan words from stdin, print total amount for each word by DESC order*/
 int main(void) {
-    test_communicate();
+    test_list();
     return 0;
 }
