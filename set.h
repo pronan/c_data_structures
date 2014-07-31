@@ -65,8 +65,10 @@ size_t set_has(SetObject *sp, void *key);
 void set_del(SetObject *sp, void *key);
 void set_discard(SetObject *sp, void *key);
 
-/*key level functions, passing references instead of a copy.
-'r' prefix is short for 'reference'*/
+/*key level functions. 'r' prefix is short for 'reference'.
+Assign @key's address directly instead of its copy's.
+So it will be dangerous to pass buffered data to these functions
+*/
 int set_radd(SetObject *sp, void *key);
 
 /*traversal interfaces of SetObject*/
