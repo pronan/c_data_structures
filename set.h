@@ -47,8 +47,8 @@ void set_free(SetObject *sp);
 SetObject *set_copy(SetObject *sp);
 size_t set_len(SetObject *sp);
 
-/* set level functions, basic operations between two sets. 
-Note, for set_iand, set_isub and set_ixor,the two sets should never 
+/* set level functions, basic operations between two sets.
+Note, for set_iand, set_isub and set_ixor,the two sets should never
 share any element i.e. the two keys have the same memory address */
 SetObject *set_or(SetObject *sp, SetObject *other);
 SetObject *set_and(SetObject *sp, SetObject *other);
@@ -60,6 +60,8 @@ int set_isub(SetObject *sp, SetObject *other);
 int set_ixor(SetObject *sp, SetObject *other);
 size_t set_issuperset(SetObject *sp, SetObject *other);
 size_t set_subset(SetObject *sp, SetObject *other);
+int set_update(SetObject *sp, SetObject *other); /*same as set_ior */
+SetObject *set_union(SetObject *sp, SetObject *other);/*same as set_or */
 
 /*key level functions*/
 int set_add(SetObject *sp, void *key);
