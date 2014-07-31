@@ -58,6 +58,31 @@ set_search(SetObject *sp, void *key, size_t hash) {
     return NULL;
 }
 
+static SetEntry *
+set_search_nodummy(SetObject *sp, void *key, size_t hash) {
+    size_t i;
+    size_t perturb;
+    size_t mask = sp->mask;
+    SetEntry *ep0 = sp->table;
+    SetEntry *ep;
+    i = (size_t)hash & mask;
+    ep = &ep0[i];
+    if (ep->key == NULL
+            || ep->key == key
+            || (ep->hash == hash && sp->keycmp(ep->key, key) == 0))
+        return ep;
+    for (perturb = hash;; perturb >>= PERTURB_SHIFT) {
+        i = (i << 2) + i + perturb + 1;
+        ep = &ep0[i & mask];
+        if (ep->key == NULL
+                || ep->key == key
+                || (ep->hash == hash && sp->keycmp(ep->key, key) == 0))
+            return ep;
+    }
+    assert(0);          /* NOT REACHED */
+    return NULL;
+}
+
 static size_t
 set_has_intern(SetObject *sp, void *key, size_t hash) {
     SetEntry *ep = set_search(sp, key, hash);
@@ -318,12 +343,10 @@ set_discard(SetObject *sp, void *key) {
 
 /*from other to sp, add keys in other but not in sp */
 int
-set_update(SetObject *sp, SetObject *other) {
+set_ior(SetObject *sp, SetObject *other) {
     size_t o_used = other->used;
     if (sp == other || o_used == 0)
         return 0;
-    /*if no keys in sp, keys in other should always be added*/
-    size_t fast_add = sp->used == 0;
     /* Do one big resize at the start, rather than
      * incrementally resizing as we insert new items.  Expect
      * that there will be no (or few) overlapping keys.
@@ -339,9 +362,10 @@ set_update(SetObject *sp, SetObject *other) {
         key = ep->key;
         if (key && key != dummy) {           /* key in other */
             o_used--;
-            if (fast_add || !set_has_intern(sp, key, ep->hash))  /* but key not in sp */
-                if (set_insert(sp, key, ep->hash) == -1)
-                    return -1;
+            /*no need to check key in sp or not because set_insert
+            will do nothing if key in sp. */
+            if (set_insert(sp, key, ep->hash) == -1)
+                return -1;
         }
     }
     return 0;
@@ -349,7 +373,7 @@ set_update(SetObject *sp, SetObject *other) {
 
 /*return a new allocated set that is the union of sp and other*/
 SetObject *
-set_union(SetObject *sp, SetObject *other) {
+set_or(SetObject *sp, SetObject *other) {
     SetObject *big = BIGGER(sp, other);
     SetObject *sml = SMALLER(sp, other);
     SetObject *result = set_copy(big); /* choose the bigger one as the start set*/
@@ -364,20 +388,23 @@ set_union(SetObject *sp, SetObject *other) {
             return NULL;
         }
     }
-    SetEntry *ep;
+    SetEntry *ep, *ep2;
     void *key;
     /* now walk the smaller one's keys */
     for (ep = sml->table; s_used > 0; ep++) {
-        if (ep->key && ep->key != dummy) {           /* key in sml */
+        key = ep->key;
+        if (key && key != dummy) {           /* key in sml */
             s_used--;
-            if (!set_has_intern(result, ep->key, ep->hash)) {  /* but key not in result */
-                if ((key = sml->keydup(ep->key)) == NULL) {
+            ep2 = set_search_nodummy(result, key, ep->hash);
+            if (ep2->key == NULL) {          /* key not in result*/
+                if ((ep2->key = result->keydup(key)) == NULL){
                     set_free(result);
                     return NULL;
                 }
-                /* there's no dummy key in result, sp use this fast way */
-                set_insert_clean(result, key, ep->hash);
-            }
+                result->fill++;
+                result->used++;
+                ep2->hash = ep->hash;
+            }/*else key is in result, do nothing */
         }
     }
     return result;
@@ -402,8 +429,9 @@ set_iand(SetObject *sp, SetObject *other) {
         key = ep->key;
         if (key && key != dummy) {           /* key in sp */
             used--;
-            if (fast_del || !set_has_intern(other, key, ep->hash)) { /* but key not in other */
-                sp->keyfree(ep->key);
+            /* but key not in other */
+            if (fast_del || !set_has_intern(other, key, ep->hash)) {
+                sp->keyfree(key);
                 ep->key = dummy;
                 sp->used--;
             } else if (--o_used == 0)
@@ -431,12 +459,12 @@ set_and(SetObject *sp, SetObject *other) {
     for (ep = sml->table; s_used > 0; ep++) {
         if (ep->key && ep->key != dummy) {           /* key in sml */
             s_used--;
-            if (set_has_intern(big, ep->key, ep->hash)) {    /* key also in big, insert */
+            if (set_has_intern(big, ep->key, ep->hash)) {    /* key also in big*/
                 if ((key = sml->keydup(ep->key)) == NULL) {
                     set_free(result);
                     return NULL;
                 }
-                /* there's no dummy key in result, sp use this fast way */
+                /* there's no dummy key in result, so use this fast way */
                 set_insert_clean(result, key, ep->hash);
             }
         }
@@ -462,7 +490,7 @@ set_isub(SetObject *sp, SetObject *other) {
         if (key && key != dummy) {           /* key in sp */
             used--;
             if (set_has_intern(other, key, ep->hash)) { /* key also in other */
-                sp->keyfree(ep->key);
+                sp->keyfree(key);
                 ep->key = dummy;
                 sp->used--;
                 if(--o_used == 0)
@@ -491,17 +519,19 @@ set_sub(SetObject *sp, SetObject *other) {
     void *key;
     size_t fast_add = 0;
     for (ep = sp->table; used > 0; ep++) {
-        if (ep->key && ep->key != dummy) {           /* key in sp */
+        if (ep->key && ep->key != dummy) {   /* key in sp */
             used--;
-            if (fast_add || !set_has_intern(other, ep->key, ep->hash)) {    /* but key not in other */
-                if ((key = sp->keydup(ep->key)) == NULL) {
+            /* but key not in other */
+            if (fast_add || !set_has_intern(other, ep->key, ep->hash)) {
+                if ((key = result->keydup(ep->key)) == NULL) {
                     set_free(result);
                     return NULL;
                 }
-                /* there's no dummy key in result, sp use this faster way */
+                /* there's no dummy key in result, so use this faster way */
                 set_insert_clean(result, key, ep->hash);
             } else if (--o_used == 0)
-                /*now, the rest of sp's keys can add directly*/
+                /*if key is also in other and all its keys are checked,
+                the rest of sp's keys can add to result directly from now on*/
                 fast_add = 1;
         }
     }
@@ -529,22 +559,23 @@ set_ixor(SetObject *sp, SetObject *other) {
     /*must walk other's keys*/
     for (ep = other->table; o_used > 0; ep++) {
         key = ep->key;
-        if (key && key != dummy) {           /* key in other */
+        if (key && key != dummy) {  /* key in other */
             o_used--;
-            if (fast_add) { /* but key not in sp */
+            if (fast_add) {         /* but key not in sp */
                 if (set_insert(sp, key, ep->hash) == -1)
                     return -1;
-            } else {
+            } else {                /* or have to go further */
                 ep2 = set_search(sp, key, ep->hash);
                 key2 = ep2->key;
+                /* key not in sp */
                 if (key2 == NULL || key2 == dummy) {
                     if ((ep2->key = sp->keydup(key)) == NULL)
                         return -1;
                     sp->used++;
-                    ep->hash = ep->hash;
+                    ep2->hash = ep->hash;
                     if (key2 == NULL)
                         sp->fill++;
-                } else { /*key is also in sp*/
+                } else {            /*key is also in sp*/
                     sp->keyfree(key2);
                     ep2->key = dummy;
                     sp->used--;
@@ -618,13 +649,13 @@ set_issuperset(SetObject *sp, SetObject *other) {
 }
 
 int
-set_ior(SetObject *sp, SetObject *other) {
-    return set_update(sp, other);
+set_update(SetObject *sp, SetObject *other) {
+    return set_ior(sp, other);
 }
 
 SetObject *
-set_or(SetObject *sp, SetObject *other) {
-    return set_union(sp, other);
+set_union(SetObject *sp, SetObject *other) {
+    return set_or(sp, other);
 }
 
 IterObject *
