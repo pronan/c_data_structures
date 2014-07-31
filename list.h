@@ -23,11 +23,12 @@ list_cnew(size_t size,
           void * (*keydup)(void *key),
           void (*keyfree)(void *key));
 ListObject *list_new(void);
-int list_clear(ListObject *lp);
+void list_clear(ListObject *lp);
 int list_free(ListObject *lp);
 ListObject *list_copy(ListObject *lp);
 int list_extend(ListObject *lp, ListObject *other);
 size_t list_len(ListObject *lp);
+size_t list_is_empty(ListObject *lp);
 
 /* list level function, return a slice copy or reference */
 ListObject *list_slice(ListObject *lp, int start, int stop);
@@ -37,6 +38,7 @@ ListObject *list_rsslice(ListObject *lp, int start, int stop, int step);
 
 /* key level functions */
 void *list_get(ListObject *lp, int index);
+int list_set(ListObject *lp, int index, void *key);
 int list_add(ListObject *lp, void *key);
 void *list_pop(ListObject *lp);
 void *list_popi(ListObject *lp, int index);
@@ -46,8 +48,11 @@ size_t list_count(ListObject *lp, void *key);
 int list_del(ListObject *lp, int index);
 int list_remove(ListObject *lp, void *key);
 
-/*key level functions, passing references instead of a copy.
-'r' prefix is short for 'reference'*/
+/*key level functions. 'r' prefix is short for 'reference'.
+Assign @key's address directly instead of its copy's.
+So it will be dangerous to pass buffered data to these functions
+*/
+int list_rset(ListObject *lp, int index, void *key);
 int list_radd(ListObject *lp, void *key);
 int list_rinsert(ListObject *lp, int index, void *key);
 
@@ -58,3 +63,5 @@ void list_iter_flush(IterObject *lio);
 
 /*other functions for printing or testing*/
 void list_print(ListObject *lp);
+
+
