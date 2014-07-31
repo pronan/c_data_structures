@@ -54,7 +54,9 @@ int dict_update(DictObject *dp, DictObject *other);
 DictObject *dict_copy(DictObject *dp);
 size_t dict_len(DictObject *dp);
 
-/*key value level functions*/
+/*key value level functions. It is suggested that pass
+buffered data of @key or @value since these functions will
+try to make a copy of them. */
 void *dict_get(DictObject *dp, void *key);
 int dict_set(DictObject *dp, void *key, void *value);
 void *dict_fget(DictObject *dp, void *key);
@@ -63,8 +65,11 @@ int dict_add(DictObject *dp, void *key, void *value);
 int dict_replace(DictObject *dp, void *key, void *value);
 size_t dict_has(DictObject *dp, void *key);
 
-/*key value level functions, passing references instead of a copy.
-'r' prefix is short for 'reference'*/
+/*key value level functions. 'r' prefix is short for 'reference'.
+Assign @key or @value's address directly instead of its copy's.
+So it will be dangerous to pass buffered data to these functions
+(except the @key of dict_rreplace).
+*/
 int dict_rset(DictObject *dp, void *key, void *value);
 int dict_radd(DictObject *dp, void *key, void *value);
 int dict_rreplace(DictObject *dp, void *key, void *value);
@@ -78,3 +83,6 @@ size_t dict_iter_items(IterObject *dio, void **key_addr, void **value_addr);
 /*other functions for printing or testing*/
 void dict_print_by_value_desc(DictObject *dp);
 void dict_print(DictObject *dp);
+
+
+
