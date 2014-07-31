@@ -255,8 +255,7 @@ size_t set_len(SetObject *sp) {
 int
 set_add(SetObject *sp, void *key) {
     assert(key);
-    size_t hash = sp->keyhash(key);
-    if (set_insert(sp, key, hash) == -1)
+    if (set_insert(sp, key, sp->keyhash(key)) == -1)
         return -1;
     if (NEED_RESIZE(sp))
         return set_resize(sp, RESIZE_NUM(sp));
@@ -277,7 +276,10 @@ set_radd(SetObject *sp, void *key) {
         ep->key = key;
         sp->used++;
         ep->hash = hash;
-    }
+    } else if(ep->key != key)
+        /*key already exists and its address is different
+        from @key's, so free key*/
+        sp->keyfree(key);
     if (NEED_RESIZE(sp))
         return set_resize(sp, RESIZE_NUM(sp));
     return 0;
@@ -696,13 +698,13 @@ set_fromlist(ListObject *lp,
              int (*keycmp)(void *key1, void *key2),
              void * (*keydup)(void *key),
              void (*keyfree)(void *key)) {
-    SetObject *sp=set_cnew(lp->used, keyhash,keycmp,keydup,keyfree);
-    if (sp==NULL)
+    SetObject *sp = set_cnew(lp->used, keyhash, keycmp, keydup, keyfree);
+    if (sp == NULL)
         return NULL;
     void *key;
     IterObject *lio = iter(lp);
     while(iterw(lio, &key)) {
-        set_add(sp,key);
+        set_add(sp, key);
     }
     free(lio);
     return sp;
