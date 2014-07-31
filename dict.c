@@ -52,8 +52,7 @@ dict_search(DictObject *dp, void *key, size_t hash) {
         return ep;
     if (ep->key == dummy)
         freeslot = ep;
-    else if (ep->hash == hash
-             && dp->keycmp(ep->key, key) == 0)
+    else if (ep->hash == hash && dp->keycmp(ep->key, key) == 0)
         return ep;
     else
         freeslot = NULL;
@@ -73,7 +72,8 @@ dict_search(DictObject *dp, void *key, size_t hash) {
     return NULL;
 }
 
-/*faster method used when no dummy key exists in table*/
+/*faster routine used when no dummy key exists in table. Currently
+used in dict_fget.*/
 static DictEntry *
 dict_search_nodummy(DictObject *dp, void *key, size_t hash) {
     size_t i;
@@ -100,18 +100,21 @@ dict_search_nodummy(DictObject *dp, void *key, size_t hash) {
 }
 
 /*
-intern routine used by dict_add, dict_replace and dict_set,
-always makes a copy of key and value and free old ones as
-possible.
+intern routine used by dict_add, dict_replace and dict_set. @key and
+@value should be buffered data, this function knows how to deal with 
+the memory.
 */
 static int
-dict_insert_by_entry(DictObject *dp, void *key, size_t hash, DictEntry *ep,
-                     void *value) {
+dict_insert_entry(DictObject *dp, void *key, size_t hash, DictEntry *ep,
+                  void *value) {
+    /*if @key exists, replacing old value with @value's copy's address
+    and free old value*/
     if (ep->value) {
         void *old_value = ep->value;
         if ((ep->value = dp->valuedup(value)) == NULL)
             return -1;
         dp->valuefree(old_value);
+    /*else make copies of @key and @value, then add them.*/
     } else {
         void *old_key = ep->key;
         if ((ep->key = dp->keydup(key)) == NULL)
@@ -130,18 +133,15 @@ dict_insert_by_entry(DictObject *dp, void *key, size_t hash, DictEntry *ep,
 
 static int
 dict_insert(DictObject *dp, void *key, size_t hash, void *value) {
-    DictEntry *ep = dict_search(dp, key, hash);
-    return dict_insert_by_entry(dp, key, hash, ep, value);
+    return dict_insert_entry(dp, key, hash, dict_search(dp, key, hash), value);
 }
 
 /*
-intern fast function to insert item when no dummy or
-equal key exists in table, and insert references, not
-a new data copy.
+intern fast function to insert an item when no dummy or equal key
+exists in table, and insert references, not a new data copy.
 */
 static void
-dict_insert_clean(DictObject *dp, void *key, size_t hash,
-                  void *value) {
+dict_insert_clean(DictObject *dp, void *key, size_t hash, void *value) {
     size_t i;
     size_t perturb;
     size_t mask = dp->mask;
@@ -214,13 +214,6 @@ dict_resize(DictObject *dp, size_t minused) {
     return 0;
 }
 
-/*helper function for sorting a DictEntry by its value*/
-static int
-_valcmp(const void *ep1, const void *ep2) {
-    return *(size_t *)(*(DictEntry *)ep1).value > *(size_t *)(*
-            (DictEntry *)ep2).value ? -1 : 1;
-}
-
 DictObject *
 dict_cnew(size_t size,
           size_t (*keyhash)(void *key),
@@ -260,6 +253,7 @@ dict_cnew(size_t size,
     return dp;
 }
 
+/*default version of a dict. That is, key is char*, value is size_t*. */
 DictObject *
 dict_new(void) {
     DictObject *dp = (DictObject *)malloc(sizeof(DictObject));
@@ -312,24 +306,21 @@ dict_free(DictObject *dp) {
     free(dp);
 }
 
-/*return key's correspondent value. if key does not
-exist, return NULL.*/
+/*if key exists, return its correspondent value, else NULL.*/
 void *
 dict_get(DictObject *dp, void *key) {
     assert(key);
-    size_t hash = dp->keyhash(key);
-    DictEntry *ep = dict_search(dp, key, hash);
+    DictEntry *ep = dict_search(dp, key, dp->keyhash(key));
     return ep->value;
 }
 
-/*if the @key exists, replacing its correspondent value A with @value's
-copy, then free A. if not, add @key and @value's copy to the dict*/
+/*almost the same as dict_insert except that this function checks
+the need to resize the dict after after insert.*/
 int
 dict_set(DictObject *dp, void *key, void *value) {
     assert(key);
     assert(value);
-    size_t hash = dp->keyhash(key);
-    if (dict_insert(dp, key, hash, value) == -1)
+    if (dict_insert(dp, key, dp->keyhash(key), value) == -1)
         return -1;
     if (NEED_RESIZE(dp))
         return dict_resize(dp, RESIZE_NUM(dp));
@@ -337,7 +328,7 @@ dict_set(DictObject *dp, void *key, void *value) {
 }
 
 /*almost the same as dict_set, except only passing @key or @value's
-address, not a copy*/
+address, not a copy's*/
 int
 dict_rset(DictObject *dp, void *key, void *value) {
     assert(key);
@@ -346,9 +337,10 @@ dict_rset(DictObject *dp, void *key, void *value) {
     DictEntry *ep = dict_search(dp, key, hash);
     /*if key exists, same as dict_rreplace*/
     if (ep->value) {
-        /* free the key if necessary*/
+        /* free the passing key if necessary*/
         if (ep->key != key)
             dp->keyfree(key);
+        /*duplicated call, return directly.*/
         if (ep->value == value)
             return 0;
         void *old_value = ep->value;
@@ -368,8 +360,7 @@ dict_rset(DictObject *dp, void *key, void *value) {
     return 0;
 }
 
-/*add @key and @value's copy to the dict. if @key already exists,
-the program will exit.*/
+/*add @key and @value's copy to the dict. Raise error if @key already exists.*/
 int
 dict_add(DictObject *dp, void *key, void *value) {
     assert(key);
@@ -378,7 +369,7 @@ dict_add(DictObject *dp, void *key, void *value) {
     DictEntry *ep = dict_search(dp, key, hash);
     /*only for non-existing keys*/
     assert(ep->value == NULL);
-    if (dict_insert_by_entry(dp, key, hash, ep, value) == -1)
+    if (dict_insert_entry(dp, key, hash, ep, value) == -1)
         return -1;
     if (NEED_RESIZE(dp))
         return dict_resize(dp, RESIZE_NUM(dp));
@@ -406,9 +397,8 @@ dict_radd(DictObject *dp, void *key, void *value) {
     return 0;
 }
 
-/*replacing an existing key's correspondent value with
-the value's copy and free old value. But if the two
-values' addresses are the same, do nothing. */
+/*replacing an existing key's correspondent value A with @value's copy
+and free A (even if the two values' addresses are the same). */
 int
 dict_replace(DictObject *dp, void *key, void *value) {
     assert(key);
@@ -417,11 +407,11 @@ dict_replace(DictObject *dp, void *key, void *value) {
     DictEntry *ep = dict_search(dp, key, hash);
     /*only for existing keys*/
     assert(ep->value);
-    return dict_insert_by_entry(dp, key, hash, ep, value);
+    return dict_insert_entry(dp, key, hash, ep, value);
 }
 
-/*almost the same as dict_replace, except only passing
-@value's address, not its memory copy*/
+/*replacing an existing key's correspondent value A with @value and
+free A except that the two values' addresses are the same. */
 int
 dict_rreplace(DictObject *dp, void *key, void *value) {
     assert(key);
@@ -453,9 +443,8 @@ dict_del(DictObject *dp, void *key) {
     dp->used--;
 }
 
-/*if @key exists, same as dict_get. if not, add @key and the
-dict's default value's copies to dict first, then return this
-entry's value.*/
+/*if @key exists, same as dict_get. if not, add the copies of @key
+and the dict's default value to dict first, then return value.*/
 void *
 dict_fget(DictObject *dp, void *key) {
     assert(key);
@@ -481,7 +470,7 @@ dict_fget(DictObject *dp, void *key) {
     return ep->value;
 }
 
-/*same as bulk call dict_set to dp with keys and values from other*/
+/*same as bulk call dict_set to @dp with keys and values from @other*/
 int
 dict_update(DictObject *dp, DictObject *other) {
     if (dp == other || other->used == 0)
@@ -495,11 +484,11 @@ dict_update(DictObject *dp, DictObject *other) {
             return -1;
     }
     DictEntry *ep;
-    size_t used = other->used;
-    for (ep = other->table; used > 0; ep++) {
+    size_t o_used = other->used;
+    for (ep = other->table; o_used > 0; ep++) {
         if (ep->value) {             /* active entry */
-            used--;
-            if (dict_insert_by_entry(dp, ep->key, ep->hash, ep, ep->value) == -1)
+            o_used--;
+            if (dict_insert_entry(dp, ep->key, ep->hash, ep, ep->value) == -1)
                 return -1;
         }
     }
@@ -538,7 +527,7 @@ dict_len(DictObject *dp) {
     return dp->used;
 }
 
-size_t 
+size_t
 dict_has(DictObject *dp, void *key) {
     assert(key);
     return dict_get(dp, key) ? 1 : 0;
@@ -619,6 +608,13 @@ dict_print(DictObject *dp) {
         fprintf(stdout, "%s\t%u\n", (char*)key, *(size_t*)value);
     }
     free(dio);
+}
+
+/*helper function for sorting a DictEntry by its value*/
+static int
+_valcmp(const void *ep1, const void *ep2) {
+    return *(size_t *)(*(DictEntry *)ep1).value > *(size_t *)(*
+            (DictEntry *)ep2).value ? -1 : 1;
 }
 
 /*print key value pair by value DESC order*/
