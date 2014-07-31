@@ -58,6 +58,12 @@ set_search(SetObject *sp, void *key, size_t hash) {
     return NULL;
 }
 
+static size_t
+set_has_intern(SetObject *sp, void *key, size_t hash) {
+    SetEntry *ep = set_search(sp, key, hash);
+    return ep->key && ep->key != dummy;
+}
+
 /* try to insert key's copy to sp */
 static int
 set_insert(SetObject *sp, void *key, size_t hash) {
@@ -278,7 +284,7 @@ set_radd(SetObject *sp, void *key) {
         ep->hash = hash;
     } else if(ep->key != key)
         /*key already exists and its address is different
-        from @key's, so free key*/
+        from @key's, so free @key*/
         sp->keyfree(key);
     if (NEED_RESIZE(sp))
         return set_resize(sp, RESIZE_NUM(sp));
@@ -333,7 +339,7 @@ set_update(SetObject *sp, SetObject *other) {
         key = ep->key;
         if (key && key != dummy) {           /* key in other */
             o_used--;
-            if (fast_add || !set_has(sp, key))  /* but key not in sp */
+            if (fast_add || !set_has_intern(sp, key, ep->hash))  /* but key not in sp */
                 if (set_insert(sp, key, ep->hash) == -1)
                     return -1;
         }
@@ -364,7 +370,7 @@ set_union(SetObject *sp, SetObject *other) {
     for (ep = sml->table; s_used > 0; ep++) {
         if (ep->key && ep->key != dummy) {           /* key in sml */
             s_used--;
-            if (!set_has(result, ep->key)) {  /* but key not in result */
+            if (!set_has_intern(result, ep->key, ep->hash)) {  /* but key not in result */
                 if ((key = sml->keydup(ep->key)) == NULL) {
                     set_free(result);
                     return NULL;
@@ -396,9 +402,11 @@ set_iand(SetObject *sp, SetObject *other) {
         key = ep->key;
         if (key && key != dummy) {           /* key in sp */
             used--;
-            if (fast_del || !set_has(other, key))  /* but key not in other */
-                set_del(sp, key);
-            else if (--o_used == 0)
+            if (fast_del || !set_has_intern(other, key, ep->hash)) { /* but key not in other */
+                sp->keyfree(ep->key);
+                ep->key = dummy;
+                sp->used--;
+            } else if (--o_used == 0)
                 /*now, the rest of sp's keys can delete directly*/
                 fast_del = 1;
         }
@@ -423,7 +431,7 @@ set_and(SetObject *sp, SetObject *other) {
     for (ep = sml->table; s_used > 0; ep++) {
         if (ep->key && ep->key != dummy) {           /* key in sml */
             s_used--;
-            if (set_has(big, ep->key)) {    /* key also in big, insert */
+            if (set_has_intern(big, ep->key, ep->hash)) {    /* key also in big, insert */
                 if ((key = sml->keydup(ep->key)) == NULL) {
                     set_free(result);
                     return NULL;
@@ -453,8 +461,10 @@ set_isub(SetObject *sp, SetObject *other) {
         key = ep->key;
         if (key && key != dummy) {           /* key in sp */
             used--;
-            if (set_has(other, key)) { /* key also in other */
-                set_del(sp, key);
+            if (set_has_intern(other, key, ep->hash)) { /* key also in other */
+                sp->keyfree(ep->key);
+                ep->key = dummy;
+                sp->used--;
                 if(--o_used == 0)
                     /*all other's keys are checked, no need to go further*/
                     break;
@@ -483,7 +493,7 @@ set_sub(SetObject *sp, SetObject *other) {
     for (ep = sp->table; used > 0; ep++) {
         if (ep->key && ep->key != dummy) {           /* key in sp */
             used--;
-            if (fast_add || !set_has(other, ep->key)) {    /* but key not in other */
+            if (fast_add || !set_has_intern(other, ep->key, ep->hash)) {    /* but key not in other */
                 if ((key = sp->keydup(ep->key)) == NULL) {
                     set_free(result);
                     return NULL;
@@ -513,21 +523,34 @@ set_ixor(SetObject *sp, SetObject *other) {
         if (set_resize(sp, (used + o_used) * 2) != 0)
             return -1;
     }
-    SetEntry *ep;
-    void *key;
+    SetEntry *ep, *ep2;
+    void *key, *key2;
     size_t fast_add = used == 0;
     /*must walk other's keys*/
     for (ep = other->table; o_used > 0; ep++) {
         key = ep->key;
         if (key && key != dummy) {           /* key in other */
             o_used--;
-            if (fast_add || !set_has(sp, key)) { /* but key not in sp */
+            if (fast_add) { /* but key not in sp */
                 if (set_insert(sp, key, ep->hash) == -1)
                     return -1;
             } else {
-                set_del(sp, key);
-                if (--used == 0)
-                    fast_add = 1;
+                ep2 = set_search(sp, key, ep->hash);
+                key2 = ep2->key;
+                if (key2 == NULL || key2 == dummy) {
+                    if ((ep2->key = sp->keydup(key)) == NULL)
+                        return -1;
+                    sp->used++;
+                    ep->hash = ep->hash;
+                    if (key2 == NULL)
+                        sp->fill++;
+                } else { /*key is also in sp*/
+                    sp->keyfree(key2);
+                    ep2->key = dummy;
+                    sp->used--;
+                    if (--used == 0)
+                        fast_add = 1;
+                }
             }
         }
     }
@@ -557,8 +580,7 @@ set_xor(SetObject *sp, SetObject *other) {
 size_t
 set_has(SetObject *sp, void *key) {
     assert(key);
-    SetEntry *ep = set_search(sp, key, sp->keyhash(key));
-    return ep->key && ep->key != dummy;
+    return set_has_intern(sp, key, sp->keyhash(key));
 }
 
 /* is sp a subset of other? */
@@ -571,7 +593,7 @@ set_issubset(SetObject *sp, SetObject *other) {
     for (ep = sp->table; used > 0; ep++) {
         if (ep->key  && ep->key != dummy) {
             used--;
-            if (!set_has(other, ep->key))
+            if (!set_has_intern(other, ep->key, ep->hash))
                 return 0;
         }
     }
@@ -588,7 +610,7 @@ set_issuperset(SetObject *sp, SetObject *other) {
     for (ep = other->table; used > 0; ep++) {
         if (ep->key  && ep->key != dummy) {
             used--;
-            if (!set_has(sp, ep->key))
+            if (!set_has_intern(sp, ep->key, ep->hash))
                 return 0;
         }
     }
