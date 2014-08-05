@@ -20,31 +20,29 @@ test_dict(void) {
     *valuebuf = 123456789;
     dict_set(mp, "test", valuebuf);
     DictObject *copy = dict_copy(mp);
-    //dict_print_by_value_desc(copy);
-    //fprintf(stdout, "===above is copy===\n");
+    dict_print_by_value_desc(copy);
+    fprintf(stdout, "===above is copy===\n");
     dict_free(copy);
     *valuebuf = 1;
     size_t *vp;
-    while (fscanf(stdin, "%s", keybuf) == 1) {
-        vp = dict_get(mp, keybuf);
-        if (vp)
-            *vp += 1;
-        else
-            dict_add(mp, keybuf, valuebuf);
-    }
-//    this is another faster version
 //    while (fscanf(stdin, "%s", keybuf) == 1) {
-//        vp = dict_fget(mp, keybuf);
-//        *vp += 1;
+//        vp = dict_get(mp, keybuf);
+//        if (vp)
+//            *vp += 1;
+//        else
+//            dict_add(mp, keybuf, valuebuf);
 //    }
-    dict_del(mp, "the");
+//    this is another faster version
+    while (fscanf(stdin, "%s", keybuf) == 1) {
+        vp = dict_fget(mp, keybuf);
+        *vp += 1;
+    }
     *valuebuf = 123456789;
-    dict_add(mp, "the", valuebuf);
+    dict_set(mp, "the", valuebuf);
     *valuebuf = 145678999;
     dict_set(mp, "xxx", valuebuf);
     dict_del(mp, "xxx");
-    dict_del(mp, "of");
-    dict_del(mp, "it");
+
     DictObject *mp2 = dict_new();
     *valuebuf = 99999999;
     dict_set(mp2, "xiangnan", valuebuf);
@@ -56,7 +54,7 @@ test_dict(void) {
     dict_print(mp);
     void *key, *value;
     IterObject *dio = iter(mp);
-    printf("\nwalk again...\n");
+    printf("\ntest iterw...\n");
     while(iterw(dio, &key)) {
         value = dict_get(mp, key);
         fprintf(stdout, "%s\t%u\n", (char*)key, *(size_t*)value);
@@ -64,9 +62,8 @@ test_dict(void) {
     *valuebuf = 9888888;
     dict_set(mp, "emacs", valuebuf);
     iterf(dio);
-    printf("\nwalk again 2...\n");
-    while(iterw(dio, &key)) {
-        value = dict_get(mp, key);
+    printf("\nnow test dict_iterkv...\n");
+    while(dict_iterkv(dio, &key, &value)) {
         fprintf(stdout, "%s\t%u\n", (char*)key, *(size_t*)value);
     }
     free(dio);
@@ -82,27 +79,28 @@ test_rb(void) {
     char keybuf[100];
     size_t valuebuf[] = { 1 };
     size_t *vp;
-    while (fscanf(stdin, "%s", keybuf) == 1) {
-        vp = rb_get(tr, keybuf);
-        if (vp)
-            *vp += 1;
-        else
-            rb_add(tr, keybuf, valuebuf);
-    }
-//    this is another faster version
 //    while (fscanf(stdin, "%s", keybuf) == 1) {
-//        vp = rb_fget(tr, keybuf);
-//        *vp += 1;
+//        vp = rb_get(tr, keybuf);
+//        if (vp)
+//            *vp += 1;
+//        else
+//            rb_add(tr, keybuf, valuebuf);
 //    }
-    rb_del(tr, "the");
+//    this is another faster version
+    while (fscanf(stdin, "%s", keybuf) == 1) {
+        vp = rb_fget(tr, keybuf);
+        *vp += 1;
+    }
+    rb_set(tr, "a", valuebuf);
     *valuebuf = 123456789;
-    rb_add(tr, "the", valuebuf);
-    *valuebuf = 1234567899;
-    rb_set(tr, "aaaaaa", valuebuf);
-    rb_set(tr, "and", valuebuf);
+    rb_add(tr, "b", valuebuf);
+    *valuebuf = 2;
+    rb_set(tr, "c", valuebuf);
+    rb_set(tr, "d", valuebuf);
     *valuebuf = 987654321;
-    //rb_update(tr,"and",valuebuf);
-    rb_del(tr, "aaaaaa");
+    rb_update(tr,"a",valuebuf);
+    rb_set(tr, "e", valuebuf);
+
     rb_print(tr);
     rb_clear(tr);
     rb_clear(tr); //just for test
@@ -119,10 +117,10 @@ test_set(void) {
     set_addfrom(b, (void**)keys2, 8);
     set_print(a); // { 'c', 'd', 'r', 'a', 'b', }
     set_print(b); // { 'c', 'l', 'm', 'a', 'z', }
-    set_print(set_sub(a, b)); //{ 'd', 'b', 'r', }
-    set_print(set_or(a, b)); //{ 'a', 'b', 'c', 'd', 'l', 'm', 'r', 'z', }
-    set_print(set_and(a, b)); //{ 'c', 'a', }
-    set_print(set_xor(a, b)); //{ 'b', 'd', 'l', 'm', 'r', 'z', }
+    set_print(set_rsub(a, b)); //{ 'd', 'b', 'r', }
+    set_print(set_ror(a, b)); //{ 'a', 'b', 'c', 'd', 'l', 'm', 'r', 'z', }
+    set_print(set_rand(a, b)); //{ 'c', 'a', }
+    set_print(set_rxor(a, b)); //{ 'b', 'd', 'l', 'm', 'r', 'z', }
     set_ior(a, b);
     set_print(a);
     set_isub(a, b);
@@ -133,6 +131,15 @@ test_set(void) {
     set_print(a);
     set_free(a);
     set_free(b);
+    char *keys3[] = {"a", "b"};
+    char *keys4[] = {"a", "b", "d", "c", "e", "f", "g", "h"};
+    SetObject *c = set_new();
+    SetObject *d = set_new();
+    set_addfrom(c, (void**)keys3, 2);
+    set_addfrom(d, (void**)keys4, 8);
+    set_print(set_xor(c, d));
+    set_print(set_and(c, d));
+    set_print(set_sub(c, d));
 }
 
 void test_list(void) {
@@ -218,6 +225,6 @@ test_communicate() {
 
 /*scan words from stdin, print total amount for each word by DESC order*/
 int main(void) {
-    test_list();
+    test_dict();
     return 0;
 }
