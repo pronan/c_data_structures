@@ -28,12 +28,6 @@ struct _setobject {
     void (*keyfree)(void *key);
 };
 
-typedef struct {
-    ObjectType type;
-    SetEntry *inipos;
-    size_t rest;
-}SetIterObject;
-
 /* set level functions */
 SetObject *
 set_cnew(size_t size,
@@ -54,6 +48,10 @@ SetObject *set_or(SetObject *sp, SetObject *other);
 SetObject *set_and(SetObject *sp, SetObject *other);
 SetObject *set_sub(SetObject *sp, SetObject *other);
 SetObject *set_xor(SetObject *sp, SetObject *other);
+SetObject *set_ror(SetObject *sp, SetObject *other);
+SetObject *set_rand(SetObject *sp, SetObject *other);
+SetObject *set_rsub(SetObject *sp, SetObject *other);
+SetObject *set_rxor(SetObject *sp, SetObject *other);
 int set_ior(SetObject *sp, SetObject *other);
 int set_iand(SetObject *sp, SetObject *other);
 int set_isub(SetObject *sp, SetObject *other);
@@ -82,6 +80,7 @@ void set_iter_flush(IterObject *sio);
 
 /*other functions for printing or testing*/
 void set_print(SetObject *sp);
+void set_print_int(SetObject *sp);
 void set_addfrom(SetObject *sp, void **keylist, size_t size);
 
 /*communicate between other data structures*/
