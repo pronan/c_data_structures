@@ -1,3 +1,5 @@
+#define MAX_HEIGHT 50
+
 typedef enum {
     BLACK, RED
 } rbcolor;
@@ -18,7 +20,7 @@ typedef struct rbtree {
     int (*keycmp)(void *key1, void *key2);
     void *(*keydup)(void *key);
     void *(*valuedup)(void *value);
-    void *(*valuedefault)(void);
+    void *(*dvf)(void);
     void (*keyfree)(void *key);
     void (*valuefree)(void *value);
 } rbtree;
@@ -33,7 +35,7 @@ rbtree *
 rb_cnew(int (*keycmp)(void *key1, void *key2),
         void * (*keydup)(void *key),
         void * (*valuedup)(void *value),
-        void * (*valuedefault)(void),
+        void * (*dvf)(void),
         void (*keyfree)(void *key),
         void (*valuefree)(void *value));
 rbtree *rb_new(void) ;
@@ -55,6 +57,11 @@ rbnode *rb_max(rbtree *tr, rbnode* x) ;
 int rb_rset(rbtree *tr, void *key, void *value) ;
 int rb_radd(rbtree *tr, void *key, void *value) ;
 int rb_rupdate(rbtree *tr, void *key, void *value) ;
+
+/* classical non-recursive traversal functions of binary tree */
+int rb_prewalk(rbtree *tr, void (*nodef)(rbnode *nd));
+int rb_inwalk(rbtree *tr, void (*nodef)(rbnode *nd));
+int rb_postwalk(rbtree *tr, void (*nodef)(rbnode *nd));
 
 /*other functions for printing or testing*/
 void rb_print(rbtree *tr);
