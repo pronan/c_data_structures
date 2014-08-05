@@ -30,8 +30,9 @@ default_valuedup(void *_value) {
     return (void *)value;
 }
 
+/* dvf is short for "default_value_function" */
 static void *
-default_valuedefault(void) {
+default_dvf(void) {
     size_t *value = (size_t*)malloc(sizeof(size_t));
     *value = 0;
     return (void *)value;
@@ -101,7 +102,7 @@ dict_search_nodummy(DictObject *dp, void *key, size_t hash) {
 
 /*
 intern routine used by dict_add, dict_replace and dict_set. @key and
-@value should be buffered data, this function knows how to deal with 
+@value should be buffered data, this function knows how to deal with
 the memory.
 */
 static int
@@ -114,7 +115,7 @@ dict_insert_entry(DictObject *dp, void *key, size_t hash, DictEntry *ep,
         if ((ep->value = dp->valuedup(value)) == NULL)
             return -1;
         dp->valuefree(old_value);
-    /*else make copies of @key and @value, then add them.*/
+        /*else make copies of @key and @value, then add them.*/
     } else {
         void *old_key = ep->key;
         if ((ep->key = dp->keydup(key)) == NULL)
@@ -137,8 +138,8 @@ dict_insert(DictObject *dp, void *key, size_t hash, void *value) {
 }
 
 /*
-intern fast function to insert an item when no dummy or equal key
-exists in table, and insert references, not a new data copy.
+intern fast function to insert @key and @value pair to dp when no dummy
+or equal key exists in dp. Assign their addresses, not new copies.
 */
 static void
 dict_insert_clean(DictObject *dp, void *key, size_t hash, void *value) {
@@ -191,7 +192,7 @@ dict_resize(DictObject *dp, size_t minused) {
             oldtable = small_copy;
         }
     } else {
-        newtable = (DictEntry*)malloc(sizeof(DictEntry) * newsize);
+        newtable = Mem_NEW(DictEntry, newsize);
         if (newtable == NULL)
             return -1;
     }
@@ -220,10 +221,10 @@ dict_cnew(size_t size,
           int (*keycmp)(void *key1, void *key2),
           void * (*keydup)(void *key),
           void * (*valuedup)(void *value),
-          void * (*valuedefault)(void),
+          void * (*dvf)(void),
           void (*keyfree)(void *key),
           void (*valuefree)(void *value)) {
-    DictObject *dp = (DictObject *)malloc(sizeof(DictObject));
+    DictObject *dp = (DictObject*)malloc(sizeof(DictObject));
     if (dp == NULL)
         return NULL;
     size_t newsize;
@@ -232,7 +233,7 @@ dict_cnew(size_t size,
             newsize <<= 1)
         ;
     if (newsize > HASH_MINSIZE) {
-        DictEntry *newtable = (DictEntry*)malloc(sizeof(DictEntry) * newsize);
+        DictEntry *newtable = Mem_NEW(DictEntry, newsize);
         if (newtable == NULL)
             return NULL;
         memset(newtable, 0, sizeof(DictEntry)* newsize);
@@ -247,7 +248,7 @@ dict_cnew(size_t size,
     dp->keycmp = keycmp ? keycmp : default_keycmp;
     dp->keydup = keydup ? keydup : default_keydup;
     dp->valuedup = valuedup ? valuedup : default_valuedup;
-    dp->valuedefault = valuedefault ? valuedefault : default_valuedefault;
+    dp->dvf = dvf ? dvf : default_dvf;
     dp->keyfree = keyfree ? keyfree : free;
     dp->valuefree = valuefree ? valuefree : free;
     return dp;
@@ -256,7 +257,7 @@ dict_cnew(size_t size,
 /*default version of a dict. That is, key is char*, value is size_t*. */
 DictObject *
 dict_new(void) {
-    DictObject *dp = (DictObject *)malloc(sizeof(DictObject));
+    DictObject *dp = (DictObject*)malloc(sizeof(DictObject));;
     if (dp == NULL)
         return NULL;
     EMPTY_TO_MINSIZE(dp);
@@ -265,7 +266,7 @@ dict_new(void) {
     dp->keycmp = default_keycmp;
     dp->keydup = default_keydup;
     dp->valuedup = default_valuedup;
-    dp->valuedefault = default_valuedefault;
+    dp->dvf = default_dvf;
     dp->keyfree = free;
     dp->valuefree = free;
     return dp;
@@ -369,8 +370,17 @@ dict_add(DictObject *dp, void *key, void *value) {
     DictEntry *ep = dict_search(dp, key, hash);
     /*only for non-existing keys*/
     assert(ep->value == NULL);
-    if (dict_insert_entry(dp, key, hash, ep, value) == -1)
+    void *old_key = ep->key;
+    if ((ep->key = dp->keydup(key)) == NULL)
         return -1;
+    if ((ep->value = dp->valuedup(value)) == NULL) {
+        dp->keyfree(ep->key);
+        return -1;
+    }
+    if (old_key == NULL)
+        dp->fill++;
+    dp->used++;
+    ep->hash = hash;
     if (NEED_RESIZE(dp))
         return dict_resize(dp, RESIZE_NUM(dp));
     return 0;
@@ -407,7 +417,11 @@ dict_replace(DictObject *dp, void *key, void *value) {
     DictEntry *ep = dict_search(dp, key, hash);
     /*only for existing keys*/
     assert(ep->value);
-    return dict_insert_entry(dp, key, hash, ep, value);
+    void *old_value = ep->value;
+    if ((ep->value = dp->valuedup(value)) == NULL)
+        return -1;
+    dp->valuefree(old_value);
+    return 0;
 }
 
 /*replacing an existing key's correspondent value A with @value and
@@ -454,7 +468,7 @@ dict_fget(DictObject *dp, void *key) {
         void *old_key = ep->key;
         if ((ep->key = dp->keydup(key)) == NULL)
             return NULL;
-        if ((ep->value = dp->valuedefault()) == NULL) {
+        if ((ep->value = dp->dvf()) == NULL) {
             dp->keyfree(ep->key);
             return NULL;
         }
@@ -536,11 +550,11 @@ dict_has(DictObject *dp, void *key) {
 IterObject *
 dict_iter_new(DictObject *dp) {
     IterObject *dio;
-    dio = (IterObject*)malloc(sizeof(IterObject));
+    dio = (IterObject*)malloc(sizeof(IterObject));;
     if (dio == NULL)
         return NULL;
-    dio->object = (void*)dp;
-    dio->inipos = (void*)dp->table;
+    dio->object = dp;
+    dio->inipos = dp->table;
     dio->rest = dp->used;
     dio->type = DICT;
     return dio;
@@ -555,7 +569,7 @@ dict_iter_walk(IterObject *dio, void **key_addr) {
         key = ep->key;
         if ( key && key != dummy) {
             dio->rest--;
-            dio->inipos = (void*)(ep + 1);
+            dio->inipos = (ep + 1);
             *key_addr = key;
             return 1;
         }
@@ -566,13 +580,13 @@ dict_iter_walk(IterObject *dio, void **key_addr) {
 void
 dict_iter_flush(IterObject *dio) {
     DictObject *dp = (DictObject *)dio->object;
-    dio->inipos = (void*)dp->table;
+    dio->inipos = dp->table;
     dio->rest = dp->used;
     dio->type = DICT;
 }
 
 size_t
-dict_iter_items(IterObject *dio, void **key_addr, void **value_addr) {
+dict_iterkv(IterObject *dio, void **key_addr, void **value_addr) {
     DictEntry *ep;
     void *key;
     size_t rest = dio->rest;
@@ -580,7 +594,7 @@ dict_iter_items(IterObject *dio, void **key_addr, void **value_addr) {
         key = ep->key;
         if ( key && key != dummy) {
             dio->rest--;
-            dio->inipos = (void*)(ep + 1);
+            dio->inipos = (ep + 1);
             *key_addr = key;
             *value_addr = ep->value;
             return 1;
@@ -593,7 +607,7 @@ void
 dict_print2(DictObject *dp) {
     void *key, *value;
     IterObject *dio = dict_iter_new(dp);
-    while (dict_iter_items(dio, &key, &value)) {
+    while (dict_iterkv(dio, &key, &value)) {
         fprintf(stdout, "%s\t%u\n", (char*)key, *(size_t*)value);
     }
     free(dio);
