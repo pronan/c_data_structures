@@ -595,8 +595,7 @@ set_isub(SetObject *sp, SetObject *other) {
 SetObject *
 set_sub(SetObject *sp, SetObject *other) {
     if (sp == other)
-        return set_cnew(HASH_MINSIZE, sp->keyhash, sp->keycmp, sp->keydup,
-                        sp->keyfree);
+        return SET_COPY_INIT_MIN(sp);
     size_t o_used = other->used;
     if (o_used == 0)
         return set_copy(sp);
@@ -630,8 +629,7 @@ set_sub(SetObject *sp, SetObject *other) {
 SetObject *
 set_rsub(SetObject *sp, SetObject *other) {
     if (sp == other)
-        return set_cnew(HASH_MINSIZE, sp->keyhash, sp->keycmp, sp->keydup,
-                        sp->keyfree);
+        return SET_COPY_INIT_MIN(sp);
     size_t o_used = other->used;
     if (o_used == 0)
         return set_rcopy(sp);
