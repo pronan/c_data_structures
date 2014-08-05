@@ -4,7 +4,7 @@
     (dp)->keycmp,\
     (dp)->keydup,\
     (dp)->valuedup,\
-    (dp)->valuedefault,\
+    (dp)->dvf,\
     (dp)->keyfree,\
     (dp)->valuefree);
 
@@ -26,7 +26,7 @@ struct _dictobject {
     int (*keycmp)(void *key1, void *key2);
     void *(*keydup)(void *key);
     void *(*valuedup)(void *value);
-    void *(*valuedefault)(void);
+    void *(*dvf)(void);
     void (*keyfree)(void *key);
     void (*valuefree)(void *value);
 };
@@ -44,7 +44,7 @@ dict_cnew(size_t size,
           int (*keycmp)(void *key1, void *key2),
           void * (*keydup)(void *key),
           void * (*valuedup)(void *value),
-          void * (*valuedefault)(void),
+          void * (*dvf)(void),
           void (*keyfree)(void *key),
           void (*valuefree)(void *value));
 DictObject *dict_new(void);
@@ -55,7 +55,7 @@ DictObject *dict_copy(DictObject *dp);
 size_t dict_len(DictObject *dp);
 
 /*key value level functions. It is suggested that pass
-buffered data of @key or @value since these functions will
+buffered data of @key or @value since most of these functions will
 try to make a copy of them. */
 void *dict_get(DictObject *dp, void *key);
 int dict_set(DictObject *dp, void *key, void *value);
@@ -68,7 +68,7 @@ size_t dict_has(DictObject *dp, void *key);
 /*key value level functions. 'r' prefix is short for 'reference'.
 Assign @key or @value's address directly instead of its copy's.
 So it will be dangerous to pass buffered data to these functions
-(except the @key of dict_rreplace).
+(except the @key of dict_rreplace, which you should pass a buffered data).
 */
 int dict_rset(DictObject *dp, void *key, void *value);
 int dict_radd(DictObject *dp, void *key, void *value);
@@ -78,11 +78,10 @@ int dict_rreplace(DictObject *dp, void *key, void *value);
 IterObject *dict_iter_new(DictObject *dp);
 size_t dict_iter_walk(IterObject *dio, void **key_addr);
 void dict_iter_flush(IterObject *dio);
-size_t dict_iter_items(IterObject *dio, void **key_addr, void **value_addr);
+
+/*special traversal function for dict. Faster to get key and value at the same time*/
+size_t dict_iterkv(IterObject *dio, void **key_addr, void **value_addr);
 
 /*other functions for printing or testing*/
 void dict_print_by_value_desc(DictObject *dp);
 void dict_print(DictObject *dp);
-
-
-
