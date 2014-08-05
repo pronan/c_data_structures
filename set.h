@@ -5,7 +5,12 @@
     (sp)->keycmp,\
     (sp)->keydup,\
     (sp)->keyfree));
-
+#define SET_COPY_INIT_MIN(sp) (set_cnew(\
+    HASH_MINSIZE,\
+    (sp)->keyhash,\
+    (sp)->keycmp,\
+    (sp)->keydup,\
+    (sp)->keyfree));
 #define BIGGER(a,b) ((a)->used>=(b)->used?(a):(b))
 #define SMALLER(a,b) ((a)->used<(b)->used?(a):(b))
 
