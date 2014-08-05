@@ -497,12 +497,13 @@ dict_update(DictObject *dp, DictObject *other) {
         if (dict_resize(dp, (dp->used + other->used) * 2) != 0)
             return -1;
     }
-    DictEntry *ep;
+    DictEntry *ep, *ep2;
     size_t o_used = other->used;
     for (ep = other->table; o_used > 0; ep++) {
         if (ep->value) {             /* active entry */
             o_used--;
-            if (dict_insert_entry(dp, ep->key, ep->hash, ep, ep->value) == -1)
+            ep2 = dict_search(dp,ep->key,ep->hash);
+            if (dict_insert_entry(dp, ep->key, ep->hash, ep2, ep->value) == -1)
                 return -1;
         }
     }
