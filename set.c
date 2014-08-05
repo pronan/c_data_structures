@@ -108,10 +108,24 @@ set_insert(SetObject *sp, void *key, size_t hash) {
     return 0;
 }
 
-/*
-intern fast function to insert key's reference to sp
-when no dummy or equal key exists.
-*/
+static int
+set_rinsert(SetObject *sp, void *key, size_t hash) {
+    SetEntry *ep = set_search(sp, key, hash);
+    if (ep->key == NULL) {
+        ep->key = key;
+        sp->fill++;
+        sp->used++;
+        ep->hash = hash;
+    } else if (ep->key == dummy) {
+        ep->key = key;
+        sp->used++;
+        ep->hash = hash;
+    }/* else already key exists, do nothing */
+    return 0;
+}
+
+/*intern fast function to assign @key's address to sp
+when no dummy or equal key exists.*/
 static void
 set_insert_clean(SetObject *sp, void *key, size_t hash) {
     size_t i;
@@ -156,7 +170,7 @@ set_resize(SetObject *sp, size_t minused) {
             oldtable = small_copy;
         }
     } else {
-        newtable = (SetEntry*)malloc(sizeof(SetEntry) * newsize);
+        newtable = Mem_NEW(SetEntry,newsize);
         if (newtable == NULL)
             return -1;
     }
@@ -192,7 +206,7 @@ set_cnew(size_t size,
             newsize <<= 1)
         ;
     if (newsize > HASH_MINSIZE) {
-        SetEntry *newtable = (SetEntry*)malloc(sizeof(SetEntry) * newsize);
+        SetEntry *newtable = Mem_NEW(SetEntry,newsize);
         if (newtable == NULL)
             return NULL;
         memset(newtable, 0, sizeof(SetEntry)* newsize);
@@ -279,6 +293,22 @@ set_copy(SetObject *sp) {
     return copy;
 }
 
+SetObject *
+set_rcopy(SetObject *sp) {
+    SetObject *copy = SET_COPY_INIT(sp);
+    if (copy == NULL)
+        return NULL;
+    SetEntry *ep;
+    size_t used = sp->used;
+    for (ep = sp->table; used > 0; ep++) {
+        if (ep->key && ep->key != dummy) {
+            used--;
+            set_insert_clean(copy, ep->key, ep->hash);
+        }
+    }
+    return copy;
+}
+
 size_t set_len(SetObject *sp) {
     return sp->used;
 }
@@ -299,8 +329,8 @@ set_radd(SetObject *sp, void *key) {
     size_t hash = sp->keyhash(key);
     SetEntry *ep = set_search(sp, key, hash);
     if (ep->key == NULL) {
-        ep->key = key;
         sp->fill++;
+        ep->key = key;
         sp->used++;
         ep->hash = hash;
     } else if (ep->key == dummy) {
@@ -410,6 +440,41 @@ set_or(SetObject *sp, SetObject *other) {
     return result;
 }
 
+SetObject *
+set_ror(SetObject *sp, SetObject *other) {
+    SetObject *big = BIGGER(sp, other);
+    SetObject *sml = SMALLER(sp, other);
+    SetObject *result = set_rcopy(big); /* choose the bigger one as the start set*/
+    if (result == NULL)
+        return NULL;
+    size_t s_used = sml->used;
+    if (big == sml || s_used == 0)
+        return result;
+    if ((result->fill + s_used) * 3 >= (result->mask + 1) * 2) {
+        if (set_resize(result, (result->used + s_used) * 2) != 0) {
+            set_free(result);
+            return NULL;
+        }
+    }
+    SetEntry *ep, *ep2;
+    void *key;
+    /* now walk the smaller one's keys */
+    for (ep = sml->table; s_used > 0; ep++) {
+        key = ep->key;
+        if (key && key != dummy) {           /* key in sml */
+            s_used--;
+            ep2 = set_search_nodummy(result, key, ep->hash);
+            if (ep2->key == NULL) {          /* key not in result*/
+                ep2->key = key;
+                result->fill++;
+                result->used++;
+                ep2->hash = ep->hash;
+            }/*else key is in result, do nothing */
+        }
+    }
+    return result;
+}
+
 /*delete sp's keys that is not in other */
 int
 set_iand(SetObject *sp, SetObject *other) {
@@ -466,6 +531,30 @@ set_and(SetObject *sp, SetObject *other) {
                 }
                 /* there's no dummy key in result, so use this fast way */
                 set_insert_clean(result, key, ep->hash);
+            }
+        }
+    }
+    return result;
+}
+
+SetObject *
+set_rand(SetObject *sp, SetObject *other) {
+    SetObject *big = BIGGER(sp, other);
+    SetObject *sml = SMALLER(sp, other);
+    if (big == sml)
+        return set_rcopy(sml);
+    SetObject *result = SET_COPY_INIT(sml);
+    if (result == NULL)
+        return NULL;
+    size_t s_used = sml->used;
+    SetEntry *ep;
+    /*walk smaller one is better*/
+    for (ep = sml->table; s_used > 0; ep++) {
+        if (ep->key && ep->key != dummy) {           /* key in sml */
+            s_used--;
+            if (set_has_intern(big, ep->key, ep->hash)) {    /* key also in big*/
+                /* there's no dummy key in result, so use this fast way */
+                set_insert_clean(result, ep->key, ep->hash);
             }
         }
     }
@@ -529,6 +618,36 @@ set_sub(SetObject *sp, SetObject *other) {
                 }
                 /* there's no dummy key in result, so use this faster way */
                 set_insert_clean(result, key, ep->hash);
+            } else if (--o_used == 0)
+                /*if key is also in other and all its keys are checked,
+                the rest of sp's keys can add to result directly from now on*/
+                fast_add = 1;
+        }
+    }
+    return result;
+}
+
+SetObject *
+set_rsub(SetObject *sp, SetObject *other) {
+    if (sp == other)
+        return set_cnew(HASH_MINSIZE, sp->keyhash, sp->keycmp, sp->keydup,
+                        sp->keyfree);
+    size_t o_used = other->used;
+    if (o_used == 0)
+        return set_rcopy(sp);
+    SetObject *result = SET_COPY_INIT(sp);
+    if (result == NULL)
+        return NULL;
+    size_t used = sp->used;
+    SetEntry *ep;
+    size_t fast_add = 0;
+    for (ep = sp->table; used > 0; ep++) {
+        if (ep->key && ep->key != dummy) {   /* key in sp */
+            used--;
+            /* but key not in other */
+            if (fast_add || !set_has_intern(other, ep->key, ep->hash)) {
+                /* there's no dummy key in result, so use this faster way */
+                set_insert_clean(result, ep->key, ep->hash);
             } else if (--o_used == 0)
                 /*if key is also in other and all its keys are checked,
                 the rest of sp's keys can add to result directly from now on*/
@@ -605,6 +724,56 @@ set_xor(SetObject *sp, SetObject *other) {
         return NULL;
     if (set_ixor(result, sml) == -1)
         return NULL;
+    return result;
+}
+
+SetObject *
+set_rxor(SetObject *sp, SetObject *other) {
+    if (sp == other)
+        return set_cnew(HASH_MINSIZE, sp->keyhash, sp->keycmp, sp->keydup,
+                        sp->keyfree);
+    SetObject *big = BIGGER(sp, other);
+    SetObject *sml = SMALLER(sp, other);
+    SetObject *result = set_rcopy(big);
+    if (result == NULL)
+        return NULL;
+    size_t o_used = sml->used;
+    if ( o_used == 0)
+        return result;
+    size_t used = result->used;
+    if ((result->fill + o_used) * 3 >= (result->mask + 1) * 2) {
+        if (set_resize(result, (used + o_used) * 2) != 0)
+            return NULL;
+    }
+    SetEntry *ep, *ep2;
+    void *key, *key2;
+    size_t fast_add = used == 0;
+    /*must walk sml's keys*/
+    for (ep = sml->table; o_used > 0; ep++) {
+        key = ep->key;
+        if (key && key != dummy) {  /* key in sml */
+            o_used--;
+            if (fast_add) {         /* but key not in result */
+                set_rinsert(result, key, ep->hash);
+            } else {                /* or have to go further */
+                ep2 = set_search(result, key, ep->hash);
+                key2 = ep2->key;
+                /* key not in result */
+                if (key2 == NULL || key2 == dummy) {
+                    ep2->key = key;
+                    result->used++;
+                    ep2->hash = ep->hash;
+                    if (key2 == NULL)
+                        result->fill++;
+                } else {            /*key is also in result*/
+                    ep2->key = dummy;
+                    result->used--;
+                    if (--used == 0)
+                        fast_add = 1;
+                }
+            }
+        }
+    }
     return result;
 }
 
