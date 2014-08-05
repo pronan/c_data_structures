@@ -17,8 +17,9 @@ default_valuedup(void *_value) {
     return (void *)value;
 }
 
+/* dvf is short for "default_value_function" */
 static void *
-default_valuedefault(void) {
+default_dvf(void) {
     size_t *value = (size_t*)malloc(sizeof(size_t));
     *value = 0;
     return (void *)value;
@@ -29,7 +30,7 @@ rbnode_new(rbtree *tr, void *key, void *value) {
     rbnode *nd = (rbnode *) malloc(sizeof(rbnode));
     if (nd == NULL)
         return NULL;
-    memset(nd, 0, sizeof(nd));
+    memset(nd, 0, sizeof(rbnode));
     if (key) {
         if ((nd->key = tr->keydup(key)) == NULL) {
             free(nd);
@@ -52,12 +53,12 @@ rbnode_fnew(rbtree *tr, void *key) {
     rbnode *nd = (rbnode *) malloc(sizeof(rbnode));
     if (nd == NULL)
         return NULL;
-    memset(nd, 0, sizeof(nd));
+    memset(nd, 0, sizeof(rbnode));
     if ((nd->key = tr->keydup(key)) == NULL) {
         free(nd);
         return NULL;
     }
-    if ((nd->value = tr->valuedefault()) == NULL) {
+    if ((nd->value = tr->dvf()) == NULL) {
         free(nd->key);
         free(nd);
         return NULL;
@@ -79,6 +80,20 @@ _rb_clear(rbtree *tr, rbnode *nd) {
         _rb_clear(tr, nd->right);
         rbnode_clear(tr, nd);
     }
+}
+
+void
+rb_clear(rbtree *tr) {
+    _rb_clear(tr, tr->root);
+    tr->root = tr->nil;
+    tr->size = 0;
+}
+
+void
+rb_free(rbtree *tr) {
+    _rb_clear(tr, tr->root);
+    rbnode_clear(tr, tr->nil);
+    free(tr);
 }
 
 static void
@@ -240,20 +255,11 @@ rb_del_fixup(rbtree *tr, rbnode *x) {
     x->color = BLACK;
 }
 
-static void
-print_by_key_asce(rbtree *tr, rbnode *nd) {
-    if (nd != tr->nil) {
-        print_by_key_asce(tr, nd->left);
-        printf("%s\t%u\n", (char*)nd->key, *(size_t*)nd->value);
-        print_by_key_asce(tr, nd->right);
-    }
-}
-
 rbtree *
 rb_cnew(int (*keycmp)(void *key1, void *key2),
         void * (*keydup)(void *key),
         void * (*valuedup)(void *value),
-        void * (*valuedefault)(void),
+        void * (*dvf)(void),
         void (*keyfree)(void *key),
         void (*valuefree)(void *value)) {
     rbtree *tr = (rbtree *) malloc(sizeof(rbtree));
@@ -270,7 +276,7 @@ rb_cnew(int (*keycmp)(void *key1, void *key2),
     tr->keycmp = keycmp ? keycmp : default_keycmp;
     tr->keydup = keydup ? keydup : default_keydup;
     tr->valuedup = valuedup ? valuedup : default_valuedup;
-    tr->valuedefault = valuedefault ? valuedefault : default_valuedefault;
+    tr->dvf = dvf ? dvf : default_dvf;
     tr->keyfree = keyfree ? keyfree : free;
     tr->valuefree = valuefree ? valuefree : free;
     return tr;
@@ -282,6 +288,8 @@ rb_new(void) {
     if (tr == NULL)
         return NULL;
     rbnode *nil = rbnode_new(tr, 0, 0);
+//    assert(nil->key==NULL);
+//    assert(nil->value==NULL);
     if (nil == NULL) {
         free(tr);
         return NULL;
@@ -292,24 +300,10 @@ rb_new(void) {
     tr->keycmp = default_keycmp;
     tr->keydup = default_keydup;
     tr->valuedup = default_valuedup;
-    tr->valuedefault = default_valuedefault;
+    tr->dvf = default_dvf;
     tr->keyfree = free;
     tr->valuefree = free;
     return tr;
-}
-
-void
-rb_clear(rbtree *tr) {
-    _rb_clear(tr, tr->root);
-    tr->root = tr->nil;
-    tr->size = 0;
-}
-
-void
-rb_free(rbtree *tr) {
-    _rb_clear(tr, tr->root);
-    rbnode_clear(tr, tr->nil);
-    free(tr);
 }
 
 void *
@@ -578,7 +572,69 @@ rb_max(rbtree *tr, rbnode *x) {
     return x;
 }
 
+int
+rb_postwalk(rbtree *tr, void (*nodef)(rbnode *nd)) {
+    int top = -1;
+    rbnode *nd_checked, *stack[MAX_HEIGHT], *nd = tr->root;
+    do {
+        while(nd != tr->nil) {
+            stack[++top] = nd;
+            nd = nd->left;
+        }
+        nd_checked = tr->nil;
+        while(top != -1) {
+            nd = stack[top];
+            if (nd->right == nd_checked) {
+                nodef(stack[top--]);
+                nd_checked = nd;
+            } else {
+                nd = nd->right;
+                break;
+            }
+        }
+    } while(top != -1);
+    return 0;
+}
+
+int
+rb_inwalk(rbtree *tr, void (*nodef)(rbnode *nd)) {
+    int top = -1;
+    rbnode *stack[MAX_HEIGHT], *nd = tr->root;
+    while(top != -1 || nd != tr->nil) {
+        while(nd != tr->nil) {
+            stack[++top] = nd;
+            nd = nd->left;
+        }
+        nd = stack[top--];
+        nodef(nd);
+        nd = nd->right;
+    }
+    return 0;
+}
+
+int
+rb_prewalk(rbtree *tr, void (*nodef)(rbnode *nd)) {
+    int top = -1;
+    rbnode *stack[MAX_HEIGHT], *nd = tr->root;
+    stack[++top] = nd;
+    while(top != -1) {
+        nd = stack[top--];
+        if (nd == tr->nil)
+            continue;
+        nodef(nd);
+        stack[++top] = nd->right;
+        stack[++top] = nd->left;
+    }
+    return 0;
+}
+
+static void
+print_nd(rbnode *nd) {
+    printf("%s\t%u\n", (char*)nd->key, *(size_t*)nd->value);
+}
+
 void
 rb_print(rbtree *tr) {
-    print_by_key_asce(tr, tr->root);
+    rb_postwalk(tr, print_nd);
 }
+
