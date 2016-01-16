@@ -1,0 +1,53 @@
+# /etc/nginx/nginx.conf
+
+user root;
+worker_processes  auto;
+error_log  /var/log/nginx/error.log warn;
+pid        /var/run/nginx.pid;
+events {
+    worker_connections  768;
+}
+http {
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 30;
+    types_hash_max_size 2048;
+    reset_timedout_connection on;
+    client_body_timeout 10;
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    access_log off;
+    
+    server {
+        listen 80;
+        server_name mydomain.com www.mydomain.com;
+        root /apps/mydomain;
+        charset utf-8;
+        client_max_body_size 5M; 
+        location /media  {
+            alias /apps/mydomain/media;
+        }
+        location /static {
+            alias /apps/mydomain/static;
+        }
+        location / {
+            uwsgi_pass  127.0.0.1:3032; 
+            include     /apps/mydomain/uwsgi_params;
+        }
+
+    }
+}
+
+# /apps/mydomain/uwsgi.ini
+[uwsgi]
+chdir           = /apps/mydomain
+module          = proj.wsgi
+home            = /apps
+socket          = 127.0.0.1:3032
+chmod-socket    = 666
+env             = DJANGO_SETTINGS_MODULE=proj.settings
+master          = true
+processes       = 1
+vacuum          = true
+pidfile         = /tmp/mydomain
