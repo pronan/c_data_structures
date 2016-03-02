@@ -1,5 +1,5 @@
 #include "xlib.h"
-
+// test
 /* Object used as dummy key to fill deleted entries */
 static DummyStruct _dummy_struct;
 #define dummy (&_dummy_struct)
